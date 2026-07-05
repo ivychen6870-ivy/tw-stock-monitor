@@ -142,6 +142,15 @@
   .stock-card.down .price, .stock-card.down .chg{color:var(--down);}
   .stock-card .sparkline{margin-top:10px;width:100%;height:32px;display:block;}
   .stock-card .sparkline-empty{margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--muted);}
+  .stock-card .volume-line{
+    margin:8px 0 0;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--muted);
+  }
+  .dynamic-category{margin-bottom:32px;}
+  .dynamic-category:last-child{margin-bottom:0;}
+  .dynamic-sub-label{margin-bottom:12px !important;}
   .signal-badges{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;}
   .signal-badge{
     font-family:var(--mono);
@@ -154,9 +163,7 @@
   .signal-badge.sell{background:#E9F6EE;color:var(--down);}
 
   .dynamic-grid{
-    display:grid;
-    grid-template-columns:repeat(auto-fit, minmax(320px,1fr));
-    gap:20px;
+    display:block;
     margin-bottom:48px;
   }
   .category-panel{
@@ -509,14 +516,14 @@ const GITHUB_REPO = "ivychen6870-ivy/tw-stock-monitor";
 */
 
 const DEMO_DATA = [
-  { code:"2330", name:"台積電", price:1015, chg:1.2, category:"核心自選股" },
-  { code:"2317", name:"鴻海",   price:186,  chg:-0.8, category:"核心自選股" },
-  { code:"2454", name:"聯發科", price:1320, chg:2.1, category:"核心自選股" },
-  { code:"0050", name:"元大台灣50", price:198, chg:0.3, category:"核心自選股" },
-  { code:"3231", name:"緯創",   price:215,  chg:6.4, category:"價格異常" },
-  { code:"2603", name:"長榮",   price:198,  chg:-5.3, category:"價格異常" },
-  { code:"6488", name:"環球晶", price:512,  chg:3.9, category:"成交量異常" },
-  { code:"2382", name:"廣達",   price:298,  chg:1.1, category:"法人異動" },
+  { code:"2330", name:"台積電", price:1015, chg:1.2, volume:18590000, category:"核心自選股" },
+  { code:"2317", name:"鴻海",   price:186,  chg:-0.8, volume:9200000, category:"核心自選股" },
+  { code:"2454", name:"聯發科", price:1320, chg:2.1, volume:4300000, category:"核心自選股" },
+  { code:"0050", name:"元大台灣50", price:198, chg:0.3, volume:6100000, category:"核心自選股" },
+  { code:"3231", name:"緯創",   price:215,  chg:6.4, volume:32000000, category:"價格異常" },
+  { code:"2603", name:"長榮",   price:198,  chg:-5.3, volume:28000000, category:"價格異常" },
+  { code:"6488", name:"環球晶", price:512,  chg:3.9, volume:5200000, category:"成交量異常" },
+  { code:"2382", name:"廣達",   price:298,  chg:1.1, volume:15000000, category:"熱度潛力股" },
 ];
 
 function buildDemoHistory(base){
@@ -562,6 +569,7 @@ async function loadStockData(){
     return rows.map(r => ({
       code: r["證券代號"], name: r["證券名稱"],
       price: parseFloat(r["收盤價"]), chg: parseFloat(r["漲跌幅%"]),
+      volume: parseInt(r["成交股數"], 10) || 0,
       category: r["類別"] || "動態觀察",
     }));
   }catch(e){
@@ -639,41 +647,50 @@ function buildSparklinePath(points){
   }).join(" ");
 }
 
+function formatVolume(shares){
+  if(!shares) return "—";
+  const lots = Math.round(shares / 1000);
+  return lots.toLocaleString("zh-TW") + " 張";
+}
+
+function buildStockCardHtml(r, history, signals){
+  const dir = r.chg >= 0 ? "up" : "down";
+  const sign = r.chg >= 0 ? "+" : "";
+  const hist = history[r.code];
+  let sparkHtml = `<p class="sparkline-empty">尚無多日歷史資料</p>`;
+  if(hist && hist.length >= 2){
+    const closes = hist.map(h => h.close);
+    const path = buildSparklinePath(closes);
+    const color = closes[closes.length-1] >= closes[0] ? "var(--up)" : "var(--down)";
+    sparkHtml = `<svg class="sparkline" viewBox="0 0 100 30" preserveAspectRatio="none">
+      <polyline points="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+  }
+  const hits = (signals && signals[r.code]) || [];
+  const badgeHtml = hits.length > 0
+    ? `<div class="signal-badges">${hits.map(h => {
+        const isBuy = h.includes("買進") || h.includes("偏多");
+        return `<span class="signal-badge ${isBuy ? 'buy' : 'sell'}">${h}</span>`;
+      }).join("")}</div>`
+    : "";
+  return `<div class="stock-card ${dir}">
+    <p class="name">${r.name} <span class="code">${r.code}</span></p>
+    <p class="price">${r.price}</p>
+    <p class="chg">${sign}${r.chg.toFixed(2)}%</p>
+    ${sparkHtml}
+    <p class="volume-line">成交量：${formatVolume(r.volume)}</p>
+    ${badgeHtml}
+  </div>`;
+}
+
 function renderCore(rows, history, signals){
   const grid = document.getElementById("coreGrid");
   const core = rows.filter(r => r.category === "核心自選股");
-  grid.innerHTML = core.map(r => {
-    const dir = r.chg >= 0 ? "up" : "down";
-    const sign = r.chg >= 0 ? "+" : "";
-    const hist = history[r.code];
-    let sparkHtml = `<p class="sparkline-empty">尚無多日歷史資料</p>`;
-    if(hist && hist.length >= 2){
-      const closes = hist.map(h => h.close);
-      const path = buildSparklinePath(closes);
-      const color = closes[closes.length-1] >= closes[0] ? "var(--up)" : "var(--down)";
-      sparkHtml = `<svg class="sparkline" viewBox="0 0 100 30" preserveAspectRatio="none">
-        <polyline points="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>`;
-    }
-    const hits = (signals && signals[r.code]) || [];
-    const badgeHtml = hits.length > 0
-      ? `<div class="signal-badges">${hits.map(h => {
-          const isBuy = h.includes("買進") || h.includes("偏多");
-          return `<span class="signal-badge ${isBuy ? 'buy' : 'sell'}">${h}</span>`;
-        }).join("")}</div>`
-      : "";
-    return `<div class="stock-card ${dir}">
-      <p class="name">${r.name} <span class="code">${r.code}</span></p>
-      <p class="price">${r.price}</p>
-      <p class="chg">${sign}${r.chg.toFixed(2)}%</p>
-      ${sparkHtml}
-      ${badgeHtml}
-    </div>`;
-  }).join("");
+  grid.innerHTML = core.map(r => buildStockCardHtml(r, history, signals)).join("");
 }
 
-function renderDynamic(rows){
-  const grid = document.getElementById("dynamicGrid");
+function renderDynamic(rows, history, signals){
+  const container = document.getElementById("dynamicGrid");
   const categories = {};
   rows.forEach(r => {
     if(r.category === "核心自選股") return;
@@ -681,17 +698,13 @@ function renderDynamic(rows){
     categories[r.category].push(r);
   });
 
-  grid.innerHTML = Object.entries(categories).map(([cat, items]) => {
-    const listHtml = items.map(r => `
-      <li>
-        <span class="stock-id">${r.code} <span class="stock-name">${r.name}</span></span>
-        <span class="stock-id">${r.chg >= 0 ? '+' : ''}${r.chg.toFixed(2)}%</span>
-      </li>`).join("");
-    return `<div class="category-panel">
-      <h3>${cat}</h3>
-      <p class="count">命中 ${items.length} 檔</p>
-      <ul class="hit-list">${listHtml}</ul>
-    </div>`;
+  container.innerHTML = Object.entries(categories).map(([cat, items]) => {
+    const cardsHtml = items.map(r => buildStockCardHtml(r, history, signals)).join("");
+    return `
+      <div class="dynamic-category">
+        <p class="section-label dynamic-sub-label">${cat}（命中 ${items.length} 檔）</p>
+        <div class="core-grid">${cardsHtml}</div>
+      </div>`;
   }).join("");
 }
 
@@ -809,7 +822,7 @@ function setupWatchForm(watchlist){
   document.getElementById("dataDate").textContent = new Date().toLocaleDateString("zh-TW");
   renderTicker(rows);
   renderCore(rows, history, signals);
-  renderDynamic(rows);
+  renderDynamic(rows, history, signals);
   renderNews(news);
   setupChartSection(rows, history);
   setupWatchForm(watchlist);
