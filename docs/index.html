@@ -10,10 +10,10 @@
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root{
-    --bg:#F5F4EF;
+    --bg:#E9E6DA;
     --panel:#FFFFFF;
-    --panel-2:#FBFAF6;
-    --line:#E4E1D6;
+    --panel-2:#F3F0E4;
+    --line:#D8D4C4;
     --ticker-bg:#14161B;
     --amber:#B5790A;
     --up:#D64545;
@@ -41,7 +41,7 @@
   .ticker-track{
     display:inline-block;
     padding-left:100%;
-    animation:scroll-left 90s linear infinite;
+    animation:scroll-left 150s linear infinite; /* 再放慢一次，之前是90s */
   }
   @keyframes scroll-left{
     0%{transform:translateX(0);}
@@ -142,6 +142,16 @@
   .stock-card.down .price, .stock-card.down .chg{color:var(--down);}
   .stock-card .sparkline{margin-top:10px;width:100%;height:32px;display:block;}
   .stock-card .sparkline-empty{margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--muted);}
+  .signal-badges{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;}
+  .signal-badge{
+    font-family:var(--mono);
+    font-size:10.5px;
+    padding:3px 8px;
+    border-radius:5px;
+    white-space:nowrap;
+  }
+  .signal-badge.buy{background:#FDEDED;color:var(--up);}
+  .signal-badge.sell{background:#E9F6EE;color:var(--down);}
 
   .dynamic-grid{
     display:grid;
@@ -207,6 +217,50 @@
     color:var(--muted);
     padding:40px 0;
     text-align:center;
+  }
+
+  /* ===================== 買賣訊號說明表 ===================== */
+  .signal-guide{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:20px;
+    margin-bottom:48px;
+    box-shadow:0 1px 2px rgba(20,20,10,0.04);
+  }
+  .signal-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+  }
+  .signal-table th{
+    text-align:left;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:1px;
+    padding:8px 10px;
+    border-bottom:1px solid var(--line);
+  }
+  .signal-table td{
+    padding:10px;
+    border-bottom:1px solid var(--line);
+    vertical-align:top;
+    color:var(--text);
+  }
+  .signal-table tr:last-child td{border-bottom:none;}
+  .signal-table td.sig-buy{color:var(--up);font-weight:600;white-space:nowrap;}
+  .signal-table td.sig-sell{color:var(--down);font-weight:600;white-space:nowrap;}
+  .signal-disclaimer{
+    margin:14px 0 0;
+    font-size:12px;
+    color:var(--muted);
+    line-height:1.6;
+  }
+  @media (max-width:640px){
+    .signal-table{font-size:12px;}
+    .signal-table th:nth-child(2), .signal-table td:nth-child(2){display:none;} /* 手機隱藏「判斷方式」欄，避免太擠 */
   }
 
   /* ===================== 今日新聞 ===================== */
@@ -354,6 +408,59 @@
     </section>
 
     <section>
+      <p class="section-label">買賣訊號說明（技術分析參考，非投資建議）</p>
+      <div class="signal-guide">
+        <table class="signal-table">
+          <thead>
+            <tr><th>訊號</th><th>判斷方式</th><th>一般解讀</th><th>注意事項</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="sig-buy">MA黃金交叉</td>
+              <td>MA5 由下往上穿越 MA20</td>
+              <td>趨勢可能轉強，買進參考</td>
+              <td>訊號會落後於實際轉折，盤整行情容易出現假訊號</td>
+            </tr>
+            <tr>
+              <td class="sig-sell">MA死亡交叉</td>
+              <td>MA5 由上往下穿越 MA20</td>
+              <td>趨勢可能轉弱，賣出參考</td>
+              <td>不代表股價一定持續下跌，需搭配整體趨勢判斷</td>
+            </tr>
+            <tr>
+              <td class="sig-buy">KD黃金交叉</td>
+              <td>K值由下往上穿越D值</td>
+              <td>短期動能轉強，尤其在KD&lt;20時較有參考價值</td>
+              <td>股價長期單邊時KD容易「鈍化」，可靠度下降</td>
+            </tr>
+            <tr>
+              <td class="sig-sell">KD死亡交叉</td>
+              <td>K值由上往下穿越D值</td>
+              <td>短期動能轉弱，尤其在KD&gt;80時較有參考價值</td>
+              <td>強勢單邊行情中容易太早出場</td>
+            </tr>
+            <tr>
+              <td class="sig-buy">突破近20日壓力</td>
+              <td>收盤價超過近20日最高價</td>
+              <td>偏多訊號，創近期新高</td>
+              <td>建議搭配成交量確認，量沒放大可能是假突破</td>
+            </tr>
+            <tr>
+              <td class="sig-sell">跌破近20日支撐</td>
+              <td>收盤價低於近20日最低價</td>
+              <td>偏空訊號，創近期新低</td>
+              <td>同上，建議搭配量能與大盤環境一起判斷</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="signal-disclaimer">
+          以上為常見技術分析參考工具，沒有任何單一指標能百分之百準確預測漲跌，
+          建議搭配基本面、籌碼面、大盤環境綜合評估，並做好資金控管。僅供參考，不構成投資建議。
+        </p>
+      </div>
+    </section>
+
+    <section>
       <p class="section-label">今日新聞（公開資訊觀測站重大訊息）</p>
       <div class="news-list" id="newsList"></div>
     </section>
@@ -495,6 +602,16 @@ async function loadWatchlist(){
   }
 }
 
+async function loadSignals(){
+  try{
+    const res = await fetch("data/signals.json", { cache:"no-store" });
+    if(!res.ok) throw new Error("no file");
+    return await res.json();
+  }catch(e){
+    return {};
+  }
+}
+
 function renderTicker(rows){
   const track = document.getElementById("tickerTrack");
   const items = rows.map(r => {
@@ -522,7 +639,7 @@ function buildSparklinePath(points){
   }).join(" ");
 }
 
-function renderCore(rows, history){
+function renderCore(rows, history, signals){
   const grid = document.getElementById("coreGrid");
   const core = rows.filter(r => r.category === "核心自選股");
   grid.innerHTML = core.map(r => {
@@ -538,11 +655,19 @@ function renderCore(rows, history){
         <polyline points="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>`;
     }
+    const hits = (signals && signals[r.code]) || [];
+    const badgeHtml = hits.length > 0
+      ? `<div class="signal-badges">${hits.map(h => {
+          const isBuy = h.includes("買進") || h.includes("偏多");
+          return `<span class="signal-badge ${isBuy ? 'buy' : 'sell'}">${h}</span>`;
+        }).join("")}</div>`
+      : "";
     return `<div class="stock-card ${dir}">
       <p class="name">${r.name} <span class="code">${r.code}</span></p>
       <p class="price">${r.price}</p>
       <p class="chg">${sign}${r.chg.toFixed(2)}%</p>
       ${sparkHtml}
+      ${badgeHtml}
     </div>`;
   }).join("");
 }
@@ -678,12 +803,12 @@ function setupWatchForm(watchlist){
 }
 
 (async function init(){
-  const [rows, history, news, watchlist] = await Promise.all([
-    loadStockData(), loadHistory(), loadNews(), loadWatchlist(),
+  const [rows, history, news, watchlist, signals] = await Promise.all([
+    loadStockData(), loadHistory(), loadNews(), loadWatchlist(), loadSignals(),
   ]);
   document.getElementById("dataDate").textContent = new Date().toLocaleDateString("zh-TW");
   renderTicker(rows);
-  renderCore(rows, history);
+  renderCore(rows, history, signals);
   renderDynamic(rows);
   renderNews(news);
   setupChartSection(rows, history);
