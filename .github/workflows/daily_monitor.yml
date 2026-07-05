@@ -9,6 +9,9 @@ on:
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
     steps:
       - name: 簽出 repo
         uses: actions/checkout@v4
@@ -27,12 +30,13 @@ jobs:
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python monitor.py
 
       - name: 把當日資料存回 repo
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add data/*.csv data/latest.csv
+          git add docs/data/
           git diff --staged --quiet || git commit -m "更新每日市場資料 $(date +%Y-%m-%d)"
           git push
