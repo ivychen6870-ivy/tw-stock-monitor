@@ -180,29 +180,56 @@ def save_extra_watchlist(codes: list):
 # 3. 動態觀察清單：從全市場資料中自動篩選符合條件的股票
 # ============================================================
 
+def is_etf_code(code: str) -> bool:
+    """
+    台股 ETF（含美債ETF、槓桿/反向ETF）代號幾乎都是「00」開頭，例如：
+    0050（元大台灣50）、00878（國泰永續高股息）、00679B（美債20年ETF）、00632R（元大台灣50反1）
+    用這個規則排除，不會影響你自己手動設定的核心自選股（那是另外獨立的清單）。
+    """
+    code = str(code).strip()
+    return code.startswith("00")
+
+
 def build_dynamic_watchlist(market_df: pd.DataFrame, inst_df: pd.DataFrame):
     result = {}
 
     market_df["漲跌幅%"] = (market_df["漲跌價差"] / (market_df["收盤價"] - market_df["漲跌價差"])) * 100
-    price_alert = market_df[market_df["漲跌幅%"].abs() >= PRICE_ALERT_PCT]
+
+    # 動態篩選只在「非ETF」的股票池裡找，避免每天的潛力股/異動清單被ETF洗版
+    stock_pool = market_df[~market_df["證券代號"].astype(str).apply(is_etf_code)].copy()
+
+    price_alert = stock_pool[stock_pool["漲跌幅%"].abs() >= PRICE_ALERT_PCT]
     price_alert = price_alert.reindex(
         price_alert["漲跌幅%"].abs().sort_values(ascending=False).index
     ).head(DYNAMIC_LIMIT_PER_CATEGORY)
     result["價格異常"] = price_alert["證券代號"].astype(str).tolist()
 
-    volume_top = market_df.sort_values("成交股數", ascending=False).head(VOLUME_TOP_N)
+    volume_top = stock_pool.sort_values("成交股數", ascending=False).head(VOLUME_TOP_N)
     result["成交量異常"] = volume_top["證券代號"].astype(str).tolist()
 
     if not inst_df.empty and "外資買賣超股數" in inst_df.columns:
-        inst_df["外資買賣超股數"] = pd.to_numeric(
-            inst_df["外資買賣超股數"].astype(str).str.replace(",", ""), errors="coerce"
+        inst_pool = inst_df[~inst_df["證券代號"].astype(str).apply(is_etf_code)].copy()
+        inst_pool["外資買賣超股數"] = pd.to_numeric(
+            inst_pool["外資買賣超股數"].astype(str).str.replace(",", ""), errors="coerce"
         )
-        inst_top = inst_df.reindex(
-            inst_df["外資買賣超股數"].abs().sort_values(ascending=False).index
+        inst_top = inst_pool.reindex(
+            inst_pool["外資買賣超股數"].abs().sort_values(ascending=False).index
         ).head(DYNAMIC_LIMIT_PER_CATEGORY)
         result["法人異動"] = inst_top["證券代號"].astype(str).tolist()
     else:
         result["法人異動"] = []
+
+    # (d) 市場熱度潛力股：綜合「成交金額排名」+「漲幅排名」，抓當日市場關注度最高、動能最強的股票
+    # 只看上漲的股票（漲幅為正），避免把重挫但成交量大的股票也算進「潛力股」；已排除ETF
+    heat_df = stock_pool[stock_pool["漲跌幅%"] > 0].copy()
+    if not heat_df.empty and "成交金額" in heat_df.columns:
+        heat_df["金額排名"] = heat_df["成交金額"].rank(ascending=False)
+        heat_df["漲幅排名"] = heat_df["漲跌幅%"].rank(ascending=False)
+        heat_df["熱度分數"] = heat_df["金額排名"] + heat_df["漲幅排名"]  # 分數越小代表越熱門
+        heat_top = heat_df.sort_values("熱度分數").head(DYNAMIC_LIMIT_PER_CATEGORY)
+        result["熱度潛力股"] = heat_top["證券代號"].astype(str).tolist()
+    else:
+        result["熱度潛力股"] = []
 
     return result
 
@@ -306,6 +333,53 @@ def update_price_history(market_df: pd.DataFrame, watch_ids: list) -> dict:
     return history
 
 
+def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int = 20) -> dict:
+    """
+    針對監控股票，比對「今天 vs 昨天」的技術指標狀態，偵測三種訊號：
+    - 均線交叉：MA5 穿越 MA20（黃金交叉＝買進參考／死亡交叉＝賣出參考）
+    - KD交叉：K線穿越D線（黃金交叉＝買進參考／死亡交叉＝賣出參考）
+    - 支撐/壓力突破：今日收盤價突破近N日高點（偏多）或跌破近N日低點（偏空）
+    回傳 { 股票代號: [訊號文字, ...] }，僅供參考，不構成投資建議。
+    """
+    signals = {}
+    for stock_id in watch_ids:
+        series = history.get(stock_id, [])
+        if len(series) < 2:
+            continue
+
+        today, yesterday = series[-1], series[-2]
+        hits = []
+
+        # 均線交叉
+        if all(v is not None for v in [today.get("ma5"), today.get("ma20"), yesterday.get("ma5"), yesterday.get("ma20")]):
+            if yesterday["ma5"] <= yesterday["ma20"] and today["ma5"] > today["ma20"]:
+                hits.append("MA黃金交叉（買進參考）")
+            elif yesterday["ma5"] >= yesterday["ma20"] and today["ma5"] < today["ma20"]:
+                hits.append("MA死亡交叉（賣出參考）")
+
+        # KD交叉
+        if all(v is not None for v in [today.get("k"), today.get("d"), yesterday.get("k"), yesterday.get("d")]):
+            if yesterday["k"] <= yesterday["d"] and today["k"] > today["d"]:
+                hits.append("KD黃金交叉（買進參考）")
+            elif yesterday["k"] >= yesterday["d"] and today["k"] < today["d"]:
+                hits.append("KD死亡交叉（賣出參考）")
+
+        # 支撐/壓力突破：用「今天以前」的近N日高低點來比對，避免用到今天自己的高低價
+        prior = series[-(breakout_window + 1):-1]
+        if len(prior) >= 5:  # 資料太少就不判斷，避免誤判
+            recent_high = max(h["high"] for h in prior)
+            recent_low = min(h["low"] for h in prior)
+            if today["close"] > recent_high:
+                hits.append(f"突破近{breakout_window}日壓力（偏多參考）")
+            elif today["close"] < recent_low:
+                hits.append(f"跌破近{breakout_window}日支撐（偏空參考）")
+
+        if hits:
+            signals[stock_id] = hits
+
+    return signals
+
+
 def compute_simple_signals(market_df: pd.DataFrame, stock_ids: list):
     subset = market_df[market_df["證券代號"].astype(str).isin(stock_ids)]
     signals = []
@@ -323,18 +397,25 @@ def compute_simple_signals(market_df: pd.DataFrame, stock_ids: list):
 # 5. 推播層：訊息合併成一則，優先用 LINE，備援用 Telegram
 # ============================================================
 
-def format_message(core_signals, dynamic_watchlist):
+def format_message(core_signals, dynamic_watchlist, buy_sell_signals=None):
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [f"📊 台股每日監控 {today}", ""]
 
     lines.append("【核心自選股】")
     for s in core_signals:
-        lines.append(f"{s['代號']} {s['名稱']}：{s['收盤價']}（{s['漲跌幅%']}%）")
+        code = str(s['代號'])
+        line = f"{code} {s['名稱']}：{s['收盤價']}（{s['漲跌幅%']}%）"
+        if buy_sell_signals and buy_sell_signals.get(code):
+            line += "\n　　⚡ " + "、".join(buy_sell_signals[code])
+        lines.append(line)
 
     lines.append("")
     for category, ids in dynamic_watchlist.items():
         if ids:
             lines.append(f"【{category}】命中 {len(ids)} 檔：{', '.join(ids)}")
+
+    lines.append("")
+    lines.append("※ 以上訊號僅供參考，不構成投資建議")
 
     return "\n".join(lines)
 
@@ -390,22 +471,25 @@ def main():
     dynamic_watchlist = build_dynamic_watchlist(market_df, inst_df)
     core_signals = compute_simple_signals(market_df, watch_ids)
 
-    # 6.3 推播（核心自選股 + 使用者額外關注的股票，都會被推播提醒）
-    message = format_message(core_signals, dynamic_watchlist)
+    # 6.3 更新 OHLC 歷史 + 技術指標（MA5/MA20/KD），要先算完才能偵測買賣訊號
+    history = update_price_history(market_df, watch_ids)
+    buy_sell_signals = detect_buy_sell_signals(history, watch_ids)
+    with open(os.path.join(DATA_DIR, "signals.json"), "w", encoding="utf-8") as f:
+        json.dump(buy_sell_signals, f, ensure_ascii=False)
+
+    # 6.4 推播（核心自選股 + 使用者額外關注的股票，都會被推播提醒，含買賣訊號）
+    message = format_message(core_signals, dynamic_watchlist, buy_sell_signals)
     print(message)
     sent = send_line_message(message)
     if not sent:
         send_telegram_message(message)
 
-    # 6.4 存檔：全市場備份（放 docs/data 底下，供之後擴充查詢用）
+    # 6.5 存檔：全市場備份（放 docs/data 底下，供之後擴充查詢用）
     today_str = datetime.now().strftime("%Y%m%d")
     market_df.to_csv(os.path.join(DATA_DIR, f"market_{today_str}.csv"), index=False, encoding="utf-8-sig")
 
-    # 6.5 儀表板專用簡化格式
+    # 6.6 儀表板專用簡化格式
     write_dashboard_csv(market_df, core_signals, dynamic_watchlist)
-
-    # 6.6 更新 OHLC 歷史 + 技術指標（MA5/MA20/KD），供 K 線圖使用
-    update_price_history(market_df, watch_ids)
 
     # 6.7 今日新聞（重大訊息公告）
     try:
@@ -451,4 +535,6 @@ def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
 
 
 if __name__ == "__main__":
+    main()
+
     main()
