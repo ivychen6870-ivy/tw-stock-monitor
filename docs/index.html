@@ -7,19 +7,22 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root{
-    --bg:#0B0E14;
-    --panel:#12161F;
-    --panel-2:#171C27;
-    --line:#242B38;
-    --amber:#FFB020;
-    --up:#FF5C5C;      /* 台股慣例：紅漲 */
-    --down:#2ECC71;    /* 台股慣例：綠跌 */
-    --text:#E8E6DF;
-    --muted:#7A8194;
+    --bg:#F5F4EF;
+    --panel:#FFFFFF;
+    --panel-2:#FBFAF6;
+    --line:#E4E1D6;
+    --ticker-bg:#14161B;
+    --amber:#B5790A;
+    --up:#D64545;
+    --down:#1F9D55;
+    --text:#1D2029;
+    --muted:#767267;
     --mono: 'IBM Plex Mono', monospace;
     --display: 'Space Grotesk', sans-serif;
+    --content-width: 1180px;
   }
 
   *{box-sizing:border-box;}
@@ -29,10 +32,8 @@
     .ticker-track{animation:none !important;}
   }
 
-  /* ===================== 頂部跑馬燈（看板招牌元素）===================== */
   .ticker-wrap{
-    background:#000;
-    border-bottom:1px solid var(--line);
+    background:var(--ticker-bg);
     overflow:hidden;
     white-space:nowrap;
     padding:10px 0;
@@ -40,7 +41,7 @@
   .ticker-track{
     display:inline-block;
     padding-left:100%;
-    animation:scroll-left 40s linear infinite;
+    animation:scroll-left 90s linear infinite;
   }
   @keyframes scroll-left{
     0%{transform:translateX(0);}
@@ -55,16 +56,19 @@
     font-size:14px;
     letter-spacing:0.5px;
   }
-  .ticker-item .code{color:var(--muted);}
-  .ticker-item .price{color:var(--text);font-weight:600;}
+  .ticker-item .code{color:#9AA0AC;}
+  .ticker-item .price{color:#F2F1EC;font-weight:600;}
   .ticker-item.up .chg{color:var(--up);}
   .ticker-item.down .chg{color:var(--down);}
 
-  /* ===================== 版頭 ===================== */
-  header.page-head{
-    max-width:1180px;
+  .page-container{
+    width:85%;
+    max-width:var(--content-width);
     margin:0 auto;
-    padding:40px 24px 24px;
+  }
+
+  header.page-head{
+    padding:40px 0 24px;
     display:flex;
     justify-content:space-between;
     align-items:flex-end;
@@ -85,6 +89,7 @@
     font-weight:700;
     margin:0;
     letter-spacing:-0.5px;
+    color:var(--text);
   }
   .updated-at{
     font-family:var(--mono);
@@ -94,9 +99,8 @@
   }
   .updated-at strong{color:var(--text);}
 
-  main{max-width:1180px;margin:0 auto;padding:32px 24px 80px;}
+  main{padding:32px 0 80px;}
 
-  /* ===================== 區塊標題 ===================== */
   .section-label{
     font-family:var(--mono);
     font-size:12px;
@@ -115,7 +119,6 @@
     background:var(--line);
   }
 
-  /* ===================== 核心自選股卡片 ===================== */
   .core-grid{
     display:grid;
     grid-template-columns:repeat(auto-fill, minmax(220px,1fr));
@@ -129,33 +132,17 @@
     padding:18px;
     position:relative;
     overflow:hidden;
+    box-shadow:0 1px 2px rgba(20,20,10,0.04);
   }
-  .stock-card .name{
-    font-size:13px;
-    color:var(--muted);
-    margin:0 0 4px;
-  }
-  .stock-card .code{
-    font-family:var(--mono);
-    font-size:12px;
-    color:var(--muted);
-  }
-  .stock-card .price{
-    font-family:var(--mono);
-    font-size:26px;
-    font-weight:600;
-    margin:10px 0 4px;
-  }
-  .stock-card .chg{
-    font-family:var(--mono);
-    font-size:14px;
-    font-weight:600;
-  }
+  .stock-card .name{font-size:13px;color:var(--muted);margin:0 0 4px;}
+  .stock-card .code{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .stock-card .price{font-family:var(--mono);font-size:26px;font-weight:600;margin:10px 0 4px;}
+  .stock-card .chg{font-family:var(--mono);font-size:14px;font-weight:600;}
   .stock-card.up .price, .stock-card.up .chg{color:var(--up);}
   .stock-card.down .price, .stock-card.down .chg{color:var(--down);}
-  .stock-card canvas{margin-top:10px;width:100% !important;height:36px !important;}
+  .stock-card .sparkline{margin-top:10px;width:100%;height:32px;display:block;}
+  .stock-card .sparkline-empty{margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--muted);}
 
-  /* ===================== 動態觀察清單 ===================== */
   .dynamic-grid{
     display:grid;
     grid-template-columns:repeat(auto-fit, minmax(320px,1fr));
@@ -167,31 +154,127 @@
     border:1px solid var(--line);
     border-radius:10px;
     padding:20px;
+    box-shadow:0 1px 2px rgba(20,20,10,0.04);
   }
-  .category-panel h3{
-    margin:0 0 4px;
-    font-size:16px;
-  }
-  .category-panel .count{
-    font-family:var(--mono);
-    font-size:12px;
-    color:var(--amber);
-    margin:0 0 14px;
-  }
+  .category-panel h3{margin:0 0 4px;font-size:16px;}
+  .category-panel .count{font-family:var(--mono);font-size:12px;color:var(--amber);margin:0 0 14px;}
   .hit-list{list-style:none;margin:0;padding:0;}
   .hit-list li{
-    display:flex;
-    justify-content:space-between;
-    padding:8px 0;
-    border-bottom:1px solid var(--line);
-    font-family:var(--mono);
-    font-size:13px;
+    display:flex;justify-content:space-between;padding:8px 0;
+    border-bottom:1px solid var(--line);font-family:var(--mono);font-size:13px;
   }
   .hit-list li:last-child{border-bottom:none;}
   .hit-list .stock-id{color:var(--text);}
   .hit-list .stock-name{color:var(--muted);}
 
-  /* ===================== 空狀態 ===================== */
+  /* ===================== 個股歷史走勢（K線圖） ===================== */
+  .chart-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:20px;
+    margin-bottom:48px;
+    box-shadow:0 1px 2px rgba(20,20,10,0.04);
+  }
+  .chart-controls{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:16px;
+    flex-wrap:wrap;
+  }
+  .chart-controls select{
+    font-family:var(--mono);
+    font-size:13px;
+    padding:6px 10px;
+    border-radius:6px;
+    border:1px solid var(--line);
+    background:var(--panel-2);
+    color:var(--text);
+  }
+  .kd-readout{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--muted);
+    display:flex;
+    gap:16px;
+  }
+  .kd-readout strong{color:var(--text);}
+  #candleChart{width:100%;height:320px;}
+  .chart-empty{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--muted);
+    padding:40px 0;
+    text-align:center;
+  }
+
+  /* ===================== 今日新聞 ===================== */
+  .news-list{
+    display:flex;flex-direction:column;gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:10px;
+    overflow:hidden;margin-bottom:48px;
+  }
+  .news-item{background:var(--panel);padding:16px 20px;display:flex;gap:16px;align-items:baseline;}
+  .news-item .news-tag{
+    flex:0 0 auto;font-family:var(--mono);font-size:12px;color:var(--amber);
+    background:#FBF0DA;border-radius:6px;padding:2px 8px;white-space:nowrap;
+  }
+  .news-item .news-body{flex:1;min-width:0;}
+  .news-item .news-title{margin:0;font-size:14px;color:var(--text);line-height:1.5;}
+  .news-item .news-meta{margin:4px 0 0;font-family:var(--mono);font-size:11px;color:var(--muted);}
+
+  /* ===================== 關注股票管理 ===================== */
+  .watch-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:20px;
+    margin-bottom:48px;
+    box-shadow:0 1px 2px rgba(20,20,10,0.04);
+  }
+  .watch-desc{
+    font-size:13px;
+    color:var(--muted);
+    margin:0 0 16px;
+    line-height:1.6;
+  }
+  .watch-form{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    align-items:center;
+  }
+  .watch-form input[type="text"]{
+    font-family:var(--mono);
+    font-size:14px;
+    padding:8px 12px;
+    border-radius:6px;
+    border:1px solid var(--line);
+    background:var(--panel-2);
+    color:var(--text);
+    flex:1;
+    min-width:200px;
+  }
+  .watch-form button{
+    font-family:var(--display);
+    font-size:14px;
+    font-weight:600;
+    padding:9px 18px;
+    border-radius:6px;
+    border:none;
+    background:var(--amber);
+    color:#FFFFFF;
+    cursor:pointer;
+  }
+  .watch-form button:hover{opacity:0.9;}
+  .watch-current{
+    margin-top:14px;
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+  }
+
   .empty-state{
     background:var(--panel-2);
     border:1px dashed var(--line);
@@ -200,29 +283,26 @@
     text-align:center;
     color:var(--muted);
     font-size:14px;
+    margin-bottom:32px;
   }
   .empty-state code{
-    font-family:var(--mono);
-    background:var(--bg);
-    padding:2px 6px;
-    border-radius:4px;
-    color:var(--amber);
+    font-family:var(--mono);background:var(--bg);padding:2px 6px;border-radius:4px;color:var(--amber);
   }
 
   footer{
-    max-width:1180px;
-    margin:0 auto;
-    padding:24px;
-    color:var(--muted);
-    font-size:12px;
-    font-family:var(--mono);
-    border-top:1px solid var(--line);
+    padding:24px 0;color:var(--muted);font-size:12px;font-family:var(--mono);border-top:1px solid var(--line);
   }
 
   @media (max-width:640px){
-    .brand-title{font-size:24px;}
+    .page-container{width:92%;}
+    .brand-title{font-size:26px;}
     header.page-head{flex-direction:column;align-items:flex-start;}
     .updated-at{text-align:left;}
+    .ticker-item{font-size:15px;}
+    .stock-card .price{font-size:28px;}
+    .stock-card .name{font-size:14px;}
+    .news-item .news-title{font-size:15px;}
+    .section-label{font-size:13px;}
   }
 </style>
 </head>
@@ -230,53 +310,95 @@
 
 <div class="ticker-wrap">
   <div class="ticker-track" id="tickerTrack">
-    <!-- 由 JS 動態填入，這裡先放預設骨架避免版面跳動 -->
     <span class="ticker-item"><span class="code">載入中</span></span>
   </div>
 </div>
 
-<header class="page-head">
-  <div>
-    <p class="brand-eyebrow">Daily Market Watch · 台股</p>
-    <h1 class="brand-title">每日監控看板</h1>
-  </div>
-  <div class="updated-at">
-    資料日期：<strong id="dataDate">—</strong><br>
-    資料來源：證交所 OpenAPI（免費公開資料）
-  </div>
-</header>
+<div class="page-container">
 
-<main>
+  <header class="page-head">
+    <div>
+      <p class="brand-eyebrow">Daily Market Watch · 台股</p>
+      <h1 class="brand-title">每日監控看板</h1>
+    </div>
+    <div class="updated-at">
+      資料日期：<strong id="dataDate">—</strong><br>
+      資料來源：證交所 OpenAPI（免費公開資料）
+    </div>
+  </header>
 
-  <section>
-    <p class="section-label">核心自選股</p>
-    <div class="core-grid" id="coreGrid"></div>
-  </section>
+  <main>
 
-  <section>
-    <p class="section-label">動態觀察清單（自動篩選命中）</p>
-    <div class="dynamic-grid" id="dynamicGrid"></div>
-  </section>
+    <section>
+      <p class="section-label">核心自選股</p>
+      <div class="core-grid" id="coreGrid"></div>
+    </section>
 
-  <div class="empty-state" id="emptyState" style="display:none;">
-    尚未偵測到資料檔案。請確認 GitHub Actions 已成功執行，
-    並將每日 CSV 輸出到 <code>data/latest.csv</code>，
-    或依下方說明調整讀取路徑。目前顯示的是示範資料。
-  </div>
+    <section>
+      <p class="section-label">動態觀察清單（自動篩選命中）</p>
+      <div class="dynamic-grid" id="dynamicGrid"></div>
+    </section>
 
-</main>
+    <section>
+      <p class="section-label">個股歷史走勢（K線圖 + MA5 / MA20 / KD）</p>
+      <div class="chart-panel">
+        <div class="chart-controls">
+          <select id="chartStockSelect"></select>
+          <div class="kd-readout" id="kdReadout"></div>
+        </div>
+        <div id="candleChart"></div>
+        <div class="chart-empty" id="chartEmpty" style="display:none;">
+          這檔股票還沒有足夠的歷史資料可以畫圖，累積幾天後會自動出現
+        </div>
+      </div>
+    </section>
 
-<footer>
-  本看板僅呈現公開市場資料，不構成投資建議 · 資料每日由 GitHub Actions 自動更新
-</footer>
+    <section>
+      <p class="section-label">今日新聞（公開資訊觀測站重大訊息）</p>
+      <div class="news-list" id="newsList"></div>
+    </section>
+
+    <section>
+      <p class="section-label">關注股票管理</p>
+      <div class="watch-panel">
+        <p class="watch-desc">
+          輸入股票代號（多檔用逗號分隔，例如 2603,3661），點「送出關注請求」會開啟一個預先填好內容的 GitHub Issue，
+          按下 Submit 送出後，下一次系統排程執行時會自動加入監控清單並開始推播提醒，同時累積歷史走勢資料。
+        </p>
+        <div class="watch-form">
+          <input type="text" id="watchInput" placeholder="例如：2603, 3661">
+          <button id="watchSubmit">送出關注請求</button>
+        </div>
+        <p class="watch-current" id="watchCurrent"></p>
+      </div>
+    </section>
+
+    <div class="empty-state" id="emptyState" style="display:none;">
+      尚未偵測到資料檔案。請確認 GitHub Actions 已成功執行，
+      並將每日 CSV 輸出到 <code>docs/data/latest.csv</code>，
+      目前顯示的是示範資料。
+    </div>
+
+  </main>
+
+  <footer>
+    本看板僅呈現公開市場資料，不構成投資建議 · 資料每日由 GitHub Actions 自動更新
+  </footer>
+
+</div>
 
 <script>
 /*
+  設定：這裡要填入你自己的 GitHub 帳號/repo名稱，「送出關注請求」按鈕才能正確導向。
+*/
+const GITHUB_REPO = "ivychen6870-ivy/tw-stock-monitor";
+
+/*
   資料讀取邏輯：
-  1. 優先嘗試讀取 repo 內的 data/latest.csv（由 monitor.py 每日產生/更新）
-  2. 若找不到檔案（例如尚未串接資料，或本機開啟測試），改用下方示範資料
-  3. CSV 欄位需求：證券代號,證券名稱,收盤價,漲跌幅%,類別
-     其中「類別」欄位用來分到動態觀察清單（例如：核心自選股 / 價格異常 / 成交量異常 / 法人異動）
+  - 股票資料：docs/data/latest.csv（欄位：證券代號,證券名稱,收盤價,漲跌幅%,類別）
+  - 走勢＋指標：docs/data/history.json（格式：{代號: [{date,open,high,low,close,ma5,ma20,k,d}, ...]}）
+  - 新聞：docs/data/news.csv（欄位：代號,名稱,主旨,日期,時間）
+  - 關注清單：docs/data/watchlist.json（格式：{core:[...], extra:[...]}）
 */
 
 const DEMO_DATA = [
@@ -290,22 +412,86 @@ const DEMO_DATA = [
   { code:"2382", name:"廣達",   price:298,  chg:1.1, category:"法人異動" },
 ];
 
-async function loadData(){
+function buildDemoHistory(base){
+  const days = 30;
+  const out = [];
+  let price = base;
+  for(let i=0;i<days;i++){
+    const open = price;
+    const close = open + (Math.random()-0.5) * base * 0.02;
+    const high = Math.max(open, close) + Math.random()*base*0.005;
+    const low = Math.min(open, close) - Math.random()*base*0.005;
+    out.push({date:`2026-06-${String(i+1).padStart(2,'0')}`, open, high, low, close});
+    price = close;
+  }
+  return out;
+}
+
+const DEMO_HISTORY = {
+  "2330": buildDemoHistory(1000),
+  "2317": buildDemoHistory(190),
+  "2454": buildDemoHistory(1300),
+  "0050": buildDemoHistory(197),
+};
+
+const DEMO_NEWS = [
+  { code:"2330", name:"台積電", subject:"公告本公司股東常會重要決議事項（示範資料）", date:"2026-07-05", time:"14:30" },
+  { code:"2317", name:"鴻海",   subject:"公告本公司與子公司間之資金貸與（示範資料）", date:"2026-07-05", time:"13:10" },
+];
+
+const DEMO_WATCHLIST = { core:["2330","2317","2454","0050"], extra:[] };
+
+async function loadCsv(path){
+  const res = await fetch(path, { cache:"no-store" });
+  if(!res.ok) throw new Error("no file: " + path);
+  const text = await res.text();
+  return Papa.parse(text, { header:true, skipEmptyLines:true }).data;
+}
+
+async function loadStockData(){
   try{
-    const res = await fetch("data/latest.csv", { cache:"no-store" });
-    if(!res.ok) throw new Error("no file");
-    const text = await res.text();
-    const parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
-    return parsed.data.map(r => ({
-      code: r["證券代號"],
-      name: r["證券名稱"],
-      price: parseFloat(r["收盤價"]),
-      chg: parseFloat(r["漲跌幅%"]),
+    const rows = await loadCsv("data/latest.csv");
+    if(rows.length === 0) throw new Error("empty");
+    return rows.map(r => ({
+      code: r["證券代號"], name: r["證券名稱"],
+      price: parseFloat(r["收盤價"]), chg: parseFloat(r["漲跌幅%"]),
       category: r["類別"] || "動態觀察",
     }));
   }catch(e){
     document.getElementById("emptyState").style.display = "block";
     return DEMO_DATA;
+  }
+}
+
+async function loadHistory(){
+  try{
+    const res = await fetch("data/history.json", { cache:"no-store" });
+    if(!res.ok) throw new Error("no file");
+    const data = await res.json();
+    if(Object.keys(data).length === 0) throw new Error("empty");
+    return data;
+  }catch(e){
+    return DEMO_HISTORY;
+  }
+}
+
+async function loadNews(){
+  try{
+    const rows = await loadCsv("data/news.csv");
+    if(rows.length === 0) throw new Error("empty");
+    return rows.map(r => ({ code:r["代號"], name:r["名稱"], subject:r["主旨"], date:r["日期"], time:r["時間"] }));
+  }catch(e){
+    return DEMO_NEWS;
+  }
+}
+
+async function loadWatchlist(){
+  try{
+    const res = await fetch("data/watchlist.json", { cache:"no-store" });
+    if(!res.ok) throw new Error("no file");
+    return await res.json();
+  }catch(e){
+    return DEMO_WATCHLIST;
   }
 }
 
@@ -320,20 +506,43 @@ function renderTicker(rows){
       <span class="chg">${sign}${r.chg.toFixed(2)}%</span>
     </span>`;
   }).join("");
-  // 重複兩次讓跑馬燈無縫循環
   track.innerHTML = items + items;
 }
 
-function renderCore(rows){
+function buildSparklinePath(points){
+  if(points.length < 2) return null;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = (max - min) || 1;
+  const stepX = 100 / (points.length - 1);
+  return points.map((v, i) => {
+    const x = i * stepX;
+    const y = 30 - ((v - min) / range) * 28 - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+}
+
+function renderCore(rows, history){
   const grid = document.getElementById("coreGrid");
   const core = rows.filter(r => r.category === "核心自選股");
   grid.innerHTML = core.map(r => {
     const dir = r.chg >= 0 ? "up" : "down";
     const sign = r.chg >= 0 ? "+" : "";
+    const hist = history[r.code];
+    let sparkHtml = `<p class="sparkline-empty">尚無多日歷史資料</p>`;
+    if(hist && hist.length >= 2){
+      const closes = hist.map(h => h.close);
+      const path = buildSparklinePath(closes);
+      const color = closes[closes.length-1] >= closes[0] ? "var(--up)" : "var(--down)";
+      sparkHtml = `<svg class="sparkline" viewBox="0 0 100 30" preserveAspectRatio="none">
+        <polyline points="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+    }
     return `<div class="stock-card ${dir}">
       <p class="name">${r.name} <span class="code">${r.code}</span></p>
       <p class="price">${r.price}</p>
       <p class="chg">${sign}${r.chg.toFixed(2)}%</p>
+      ${sparkHtml}
     </div>`;
   }).join("");
 }
@@ -351,7 +560,7 @@ function renderDynamic(rows){
     const listHtml = items.map(r => `
       <li>
         <span class="stock-id">${r.code} <span class="stock-name">${r.name}</span></span>
-        <span class="${r.chg >= 0 ? 'stock-id' : 'stock-id'}">${r.chg >= 0 ? '+' : ''}${r.chg.toFixed(2)}%</span>
+        <span class="stock-id">${r.chg >= 0 ? '+' : ''}${r.chg.toFixed(2)}%</span>
       </li>`).join("");
     return `<div class="category-panel">
       <h3>${cat}</h3>
@@ -361,12 +570,124 @@ function renderDynamic(rows){
   }).join("");
 }
 
+function renderNews(newsRows){
+  const list = document.getElementById("newsList");
+  if(!newsRows || newsRows.length === 0){
+    list.innerHTML = `<div class="news-item"><p class="news-title">今日尚無重大訊息公告</p></div>`;
+    return;
+  }
+  list.innerHTML = newsRows.map(n => `
+    <div class="news-item">
+      <span class="news-tag">${n.code || ""}</span>
+      <div class="news-body">
+        <p class="news-title">${n.subject || ""}</p>
+        <p class="news-meta">${n.name || ""} · ${n.date || ""} ${n.time || ""}</p>
+      </div>
+    </div>
+  `).join("");
+}
+
+let chart, candleSeries, ma5Series, ma20Series;
+
+function initChart(){
+  const container = document.getElementById("candleChart");
+  chart = LightweightCharts.createChart(container, {
+    layout: { background: { color: "transparent" }, textColor: "#1D2029", fontFamily: "IBM Plex Mono" },
+    grid: { vertLines: { color: "#E4E1D6" }, horzLines: { color: "#E4E1D6" } },
+    rightPriceScale: { borderColor: "#E4E1D6" },
+    timeScale: { borderColor: "#E4E1D6" },
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor: "#D64545", downColor: "#1F9D55",
+    borderUpColor: "#D64545", borderDownColor: "#1F9D55",
+    wickUpColor: "#D64545", wickDownColor: "#1F9D55",
+  });
+  ma5Series = chart.addLineSeries({ color: "#B5790A", lineWidth: 1, priceLineVisible: false });
+  ma20Series = chart.addLineSeries({ color: "#5B6472", lineWidth: 1, priceLineVisible: false });
+
+  new ResizeObserver(entries => {
+    if(entries.length === 0) return;
+    chart.applyOptions({ width: entries[0].contentRect.width });
+  }).observe(container);
+}
+
+function renderChartFor(stockId, history){
+  const series = history[stockId];
+  const emptyBox = document.getElementById("chartEmpty");
+  const kdBox = document.getElementById("kdReadout");
+
+  if(!series || series.length < 2){
+    document.getElementById("candleChart").style.display = "none";
+    emptyBox.style.display = "block";
+    kdBox.innerHTML = "";
+    return;
+  }
+  document.getElementById("candleChart").style.display = "block";
+  emptyBox.style.display = "none";
+
+  const candles = series.map(h => ({ time: h.date, open: h.open, high: h.high, low: h.low, close: h.close }));
+  const ma5 = series.filter(h => h.ma5 !== null && h.ma5 !== undefined).map(h => ({ time: h.date, value: h.ma5 }));
+  const ma20 = series.filter(h => h.ma20 !== null && h.ma20 !== undefined).map(h => ({ time: h.date, value: h.ma20 }));
+
+  candleSeries.setData(candles);
+  ma5Series.setData(ma5);
+  ma20Series.setData(ma20);
+  chart.timeScale().fitContent();
+
+  const last = series[series.length - 1];
+  if(last.k !== null && last.k !== undefined){
+    kdBox.innerHTML = `<span>K: <strong>${last.k}</strong></span><span>D: <strong>${last.d}</strong></span>`;
+  }else{
+    kdBox.innerHTML = `<span>KD 指標需要至少9天歷史資料，累積中…</span>`;
+  }
+}
+
+function setupChartSection(rows, history){
+  const select = document.getElementById("chartStockSelect");
+  const coreRows = rows.filter(r => r.category === "核心自選股" || history[r.code]);
+  const uniqueMap = new Map();
+  coreRows.forEach(r => uniqueMap.set(r.code, r.name));
+  Object.keys(history).forEach(code => { if(!uniqueMap.has(code)) uniqueMap.set(code, code); });
+
+  select.innerHTML = Array.from(uniqueMap.entries())
+    .map(([code, name]) => `<option value="${code}">${code} ${name}</option>`)
+    .join("");
+
+  initChart();
+  if(uniqueMap.size > 0){
+    const firstCode = uniqueMap.keys().next().value;
+    renderChartFor(firstCode, history);
+  }
+  select.addEventListener("change", () => renderChartFor(select.value, history));
+}
+
+function setupWatchForm(watchlist){
+  const current = document.getElementById("watchCurrent");
+  const allCodes = [...(watchlist.core || []), ...(watchlist.extra || [])];
+  current.textContent = `目前監控中：${allCodes.join(", ")}`;
+
+  document.getElementById("watchSubmit").addEventListener("click", () => {
+    const raw = document.getElementById("watchInput").value.trim();
+    if(!raw){ return; }
+    const codes = raw.split(",").map(s => s.trim()).filter(Boolean).join(",");
+    const title = encodeURIComponent(`watch-request: ${codes}`);
+    const body = encodeURIComponent("此 Issue 由網頁自動產生，送出後下一次排程執行會自動處理並關閉本 Issue。");
+    const url = `https://github.com/${GITHUB_REPO}/issues/new?title=${title}&body=${body}`;
+    window.open(url, "_blank");
+  });
+}
+
 (async function init(){
-  const rows = await loadData();
+  const [rows, history, news, watchlist] = await Promise.all([
+    loadStockData(), loadHistory(), loadNews(), loadWatchlist(),
+  ]);
   document.getElementById("dataDate").textContent = new Date().toLocaleDateString("zh-TW");
   renderTicker(rows);
-  renderCore(rows);
+  renderCore(rows, history);
   renderDynamic(rows);
+  renderNews(news);
+  setupChartSection(rows, history);
+  setupWatchForm(watchlist);
 })();
 </script>
 
