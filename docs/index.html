@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台股監控看板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root{
+    --bg:#0B0E14;
+    --panel:#12161F;
+    --panel-2:#171C27;
+    --line:#242B38;
+    --amber:#FFB020;
+    --up:#FF5C5C;      /* 台股慣例：紅漲 */
+    --down:#2ECC71;    /* 台股慣例：綠跌 */
+    --text:#E8E6DF;
+    --muted:#7A8194;
+    --mono: 'IBM Plex Mono', monospace;
+    --display: 'Space Grotesk', sans-serif;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--display);}
+
+  @media (prefers-reduced-motion: reduce){
+    .ticker-track{animation:none !important;}
+  }
+
+  /* ===================== 頂部跑馬燈（看板招牌元素）===================== */
+  .ticker-wrap{
+    background:#000;
+    border-bottom:1px solid var(--line);
+    overflow:hidden;
+    white-space:nowrap;
+    padding:10px 0;
+  }
+  .ticker-track{
+    display:inline-block;
+    padding-left:100%;
+    animation:scroll-left 40s linear infinite;
+  }
+  @keyframes scroll-left{
+    0%{transform:translateX(0);}
+    100%{transform:translateX(-100%);}
+  }
+  .ticker-item{
+    display:inline-flex;
+    align-items:baseline;
+    gap:8px;
+    margin-right:40px;
+    font-family:var(--mono);
+    font-size:14px;
+    letter-spacing:0.5px;
+  }
+  .ticker-item .code{color:var(--muted);}
+  .ticker-item .price{color:var(--text);font-weight:600;}
+  .ticker-item.up .chg{color:var(--up);}
+  .ticker-item.down .chg{color:var(--down);}
+
+  /* ===================== 版頭 ===================== */
+  header.page-head{
+    max-width:1180px;
+    margin:0 auto;
+    padding:40px 24px 24px;
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    gap:16px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand-eyebrow{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--amber);
+    letter-spacing:2px;
+    text-transform:uppercase;
+    margin:0 0 6px;
+  }
+  .brand-title{
+    font-size:32px;
+    font-weight:700;
+    margin:0;
+    letter-spacing:-0.5px;
+  }
+  .updated-at{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--muted);
+    text-align:right;
+  }
+  .updated-at strong{color:var(--text);}
+
+  main{max-width:1180px;margin:0 auto;padding:32px 24px 80px;}
+
+  /* ===================== 區塊標題 ===================== */
+  .section-label{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+    letter-spacing:2px;
+    text-transform:uppercase;
+    margin:0 0 16px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .section-label::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line);
+  }
+
+  /* ===================== 核心自選股卡片 ===================== */
+  .core-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(220px,1fr));
+    gap:14px;
+    margin-bottom:48px;
+  }
+  .stock-card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px;
+    position:relative;
+    overflow:hidden;
+  }
+  .stock-card .name{
+    font-size:13px;
+    color:var(--muted);
+    margin:0 0 4px;
+  }
+  .stock-card .code{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+  }
+  .stock-card .price{
+    font-family:var(--mono);
+    font-size:26px;
+    font-weight:600;
+    margin:10px 0 4px;
+  }
+  .stock-card .chg{
+    font-family:var(--mono);
+    font-size:14px;
+    font-weight:600;
+  }
+  .stock-card.up .price, .stock-card.up .chg{color:var(--up);}
+  .stock-card.down .price, .stock-card.down .chg{color:var(--down);}
+  .stock-card canvas{margin-top:10px;width:100% !important;height:36px !important;}
+
+  /* ===================== 動態觀察清單 ===================== */
+  .dynamic-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(320px,1fr));
+    gap:20px;
+    margin-bottom:48px;
+  }
+  .category-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:20px;
+  }
+  .category-panel h3{
+    margin:0 0 4px;
+    font-size:16px;
+  }
+  .category-panel .count{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--amber);
+    margin:0 0 14px;
+  }
+  .hit-list{list-style:none;margin:0;padding:0;}
+  .hit-list li{
+    display:flex;
+    justify-content:space-between;
+    padding:8px 0;
+    border-bottom:1px solid var(--line);
+    font-family:var(--mono);
+    font-size:13px;
+  }
+  .hit-list li:last-child{border-bottom:none;}
+  .hit-list .stock-id{color:var(--text);}
+  .hit-list .stock-name{color:var(--muted);}
+
+  /* ===================== 空狀態 ===================== */
+  .empty-state{
+    background:var(--panel-2);
+    border:1px dashed var(--line);
+    border-radius:10px;
+    padding:32px;
+    text-align:center;
+    color:var(--muted);
+    font-size:14px;
+  }
+  .empty-state code{
+    font-family:var(--mono);
+    background:var(--bg);
+    padding:2px 6px;
+    border-radius:4px;
+    color:var(--amber);
+  }
+
+  footer{
+    max-width:1180px;
+    margin:0 auto;
+    padding:24px;
+    color:var(--muted);
+    font-size:12px;
+    font-family:var(--mono);
+    border-top:1px solid var(--line);
+  }
+
+  @media (max-width:640px){
+    .brand-title{font-size:24px;}
+    header.page-head{flex-direction:column;align-items:flex-start;}
+    .updated-at{text-align:left;}
+  }
+</style>
+</head>
+<body>
+
+<div class="ticker-wrap">
+  <div class="ticker-track" id="tickerTrack">
+    <!-- 由 JS 動態填入，這裡先放預設骨架避免版面跳動 -->
+    <span class="ticker-item"><span class="code">載入中</span></span>
+  </div>
+</div>
+
+<header class="page-head">
+  <div>
+    <p class="brand-eyebrow">Daily Market Watch · 台股</p>
+    <h1 class="brand-title">每日監控看板</h1>
+  </div>
+  <div class="updated-at">
+    資料日期：<strong id="dataDate">—</strong><br>
+    資料來源：證交所 OpenAPI（免費公開資料）
+  </div>
+</header>
+
+<main>
+
+  <section>
+    <p class="section-label">核心自選股</p>
+    <div class="core-grid" id="coreGrid"></div>
+  </section>
+
+  <section>
+    <p class="section-label">動態觀察清單（自動篩選命中）</p>
+    <div class="dynamic-grid" id="dynamicGrid"></div>
+  </section>
+
+  <div class="empty-state" id="emptyState" style="display:none;">
+    尚未偵測到資料檔案。請確認 GitHub Actions 已成功執行，
+    並將每日 CSV 輸出到 <code>data/latest.csv</code>，
+    或依下方說明調整讀取路徑。目前顯示的是示範資料。
+  </div>
+
+</main>
+
+<footer>
+  本看板僅呈現公開市場資料，不構成投資建議 · 資料每日由 GitHub Actions 自動更新
+</footer>
+
+<script>
+/*
+  資料讀取邏輯：
+  1. 優先嘗試讀取 repo 內的 data/latest.csv（由 monitor.py 每日產生/更新）
+  2. 若找不到檔案（例如尚未串接資料，或本機開啟測試），改用下方示範資料
+  3. CSV 欄位需求：證券代號,證券名稱,收盤價,漲跌幅%,類別
+     其中「類別」欄位用來分到動態觀察清單（例如：核心自選股 / 價格異常 / 成交量異常 / 法人異動）
+*/
+
+const DEMO_DATA = [
+  { code:"2330", name:"台積電", price:1015, chg:1.2, category:"核心自選股" },
+  { code:"2317", name:"鴻海",   price:186,  chg:-0.8, category:"核心自選股" },
+  { code:"2454", name:"聯發科", price:1320, chg:2.1, category:"核心自選股" },
+  { code:"0050", name:"元大台灣50", price:198, chg:0.3, category:"核心自選股" },
+  { code:"3231", name:"緯創",   price:215,  chg:6.4, category:"價格異常" },
+  { code:"2603", name:"長榮",   price:198,  chg:-5.3, category:"價格異常" },
+  { code:"6488", name:"環球晶", price:512,  chg:3.9, category:"成交量異常" },
+  { code:"2382", name:"廣達",   price:298,  chg:1.1, category:"法人異動" },
+];
+
+async function loadData(){
+  try{
+    const res = await fetch("data/latest.csv", { cache:"no-store" });
+    if(!res.ok) throw new Error("no file");
+    const text = await res.text();
+    const parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
+    return parsed.data.map(r => ({
+      code: r["證券代號"],
+      name: r["證券名稱"],
+      price: parseFloat(r["收盤價"]),
+      chg: parseFloat(r["漲跌幅%"]),
+      category: r["類別"] || "動態觀察",
+    }));
+  }catch(e){
+    document.getElementById("emptyState").style.display = "block";
+    return DEMO_DATA;
+  }
+}
+
+function renderTicker(rows){
+  const track = document.getElementById("tickerTrack");
+  const items = rows.map(r => {
+    const dir = r.chg >= 0 ? "up" : "down";
+    const sign = r.chg >= 0 ? "+" : "";
+    return `<span class="ticker-item ${dir}">
+      <span class="code">${r.code} ${r.name}</span>
+      <span class="price">${r.price}</span>
+      <span class="chg">${sign}${r.chg.toFixed(2)}%</span>
+    </span>`;
+  }).join("");
+  // 重複兩次讓跑馬燈無縫循環
+  track.innerHTML = items + items;
+}
+
+function renderCore(rows){
+  const grid = document.getElementById("coreGrid");
+  const core = rows.filter(r => r.category === "核心自選股");
+  grid.innerHTML = core.map(r => {
+    const dir = r.chg >= 0 ? "up" : "down";
+    const sign = r.chg >= 0 ? "+" : "";
+    return `<div class="stock-card ${dir}">
+      <p class="name">${r.name} <span class="code">${r.code}</span></p>
+      <p class="price">${r.price}</p>
+      <p class="chg">${sign}${r.chg.toFixed(2)}%</p>
+    </div>`;
+  }).join("");
+}
+
+function renderDynamic(rows){
+  const grid = document.getElementById("dynamicGrid");
+  const categories = {};
+  rows.forEach(r => {
+    if(r.category === "核心自選股") return;
+    if(!categories[r.category]) categories[r.category] = [];
+    categories[r.category].push(r);
+  });
+
+  grid.innerHTML = Object.entries(categories).map(([cat, items]) => {
+    const listHtml = items.map(r => `
+      <li>
+        <span class="stock-id">${r.code} <span class="stock-name">${r.name}</span></span>
+        <span class="${r.chg >= 0 ? 'stock-id' : 'stock-id'}">${r.chg >= 0 ? '+' : ''}${r.chg.toFixed(2)}%</span>
+      </li>`).join("");
+    return `<div class="category-panel">
+      <h3>${cat}</h3>
+      <p class="count">命中 ${items.length} 檔</p>
+      <ul class="hit-list">${listHtml}</ul>
+    </div>`;
+  }).join("");
+}
+
+(async function init(){
+  const rows = await loadData();
+  document.getElementById("dataDate").textContent = new Date().toLocaleDateString("zh-TW");
+  renderTicker(rows);
+  renderCore(rows);
+  renderDynamic(rows);
+})();
+</script>
+
+</body>
+</html>
