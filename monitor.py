@@ -21,7 +21,23 @@ from datetime import datetime
 # ============================================================
 
 # 固定層：你手動關注的核心自選股（股票代號）
-CORE_WATCHLIST = ["2330", "2317", "2454", "0050"]
+# 注意：5309(系統電)是上櫃股票(TPEx)，目前資料源只抓上市(TWSE)，暫時不會有資料
+CORE_WATCHLIST = [
+    "2330", "2317", "2454", "0050",
+    "5309",  # 系統電（上櫃，暫無資料，等之後串接TPEx資料源）
+    "2421",  # 建準
+    "2486",  # 一詮
+    "2399",  # 映泰
+    "3481",  # 群創
+    "3324",  # 雙鴻
+    "3017",  # 奇鋐
+    "3653",  # 健策
+    "8210",  # 勤誠
+    "6691",  # 洋基工程
+]
+
+# 推播訊息裡，每個動態分類最多顯示幾檔（避免訊息太長），網頁則會顯示完整的 DYNAMIC_LIMIT_PER_CATEGORY 檔數
+PUSH_MESSAGE_TOP_N = 5
 
 # 動態層每個類別最多納入幾檔，避免推播爆量
 DYNAMIC_LIMIT_PER_CATEGORY = 10
@@ -397,7 +413,7 @@ def compute_simple_signals(market_df: pd.DataFrame, stock_ids: list):
 # 5. 推播層：訊息合併成一則，優先用 LINE，備援用 Telegram
 # ============================================================
 
-def format_message(core_signals, dynamic_watchlist, buy_sell_signals=None):
+def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=None):
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [f"📊 台股每日監控 {today}", ""]
 
@@ -409,12 +425,23 @@ def format_message(core_signals, dynamic_watchlist, buy_sell_signals=None):
             line += "\n　　⚡ " + "、".join(buy_sell_signals[code])
         lines.append(line)
 
+    lookup = market_df.set_index(market_df["證券代號"].astype(str))
     lines.append("")
     for category, ids in dynamic_watchlist.items():
-        if ids:
-            lines.append(f"【{category}】命中 {len(ids)} 檔：{', '.join(ids)}")
+        if not ids:
+            continue
+        top_ids = ids[:PUSH_MESSAGE_TOP_N]
+        lines.append(f"【{category}】命中 {len(ids)} 檔，以下為前{len(top_ids)}：")
+        for stock_id in top_ids:
+            if stock_id not in lookup.index:
+                continue
+            row = lookup.loc[stock_id]
+            name = row.get("證券名稱", "")
+            price = row.get("收盤價", "")
+            chg = round(row.get("漲跌幅%", 0), 2)
+            lines.append(f"{stock_id} {name}：{price}（{chg}%）")
+        lines.append("")
 
-    lines.append("")
     lines.append("※ 以上訊號僅供參考，不構成投資建議")
 
     return "\n".join(lines)
@@ -471,14 +498,18 @@ def main():
     dynamic_watchlist = build_dynamic_watchlist(market_df, inst_df)
     core_signals = compute_simple_signals(market_df, watch_ids)
 
-    # 6.3 更新 OHLC 歷史 + 技術指標（MA5/MA20/KD），要先算完才能偵測買賣訊號
-    history = update_price_history(market_df, watch_ids)
+    # 6.3 更新 OHLC 歷史 + 技術指標（MA5/MA20/KD）
+    # 追蹤範圍擴大到「核心自選股 + 動態清單當日命中的股票」，這樣動態清單的股票之後才有機會累積出走勢圖
+    # （只算買賣訊號時，還是只看 watch_ids，避免每天變動的動態股票被誤判交叉訊號）
+    all_dynamic_ids = [sid for ids in dynamic_watchlist.values() for sid in ids]
+    history_ids = list(dict.fromkeys(watch_ids + all_dynamic_ids))
+    history = update_price_history(market_df, history_ids)
     buy_sell_signals = detect_buy_sell_signals(history, watch_ids)
     with open(os.path.join(DATA_DIR, "signals.json"), "w", encoding="utf-8") as f:
         json.dump(buy_sell_signals, f, ensure_ascii=False)
 
     # 6.4 推播（核心自選股 + 使用者額外關注的股票，都會被推播提醒，含買賣訊號）
-    message = format_message(core_signals, dynamic_watchlist, buy_sell_signals)
+    message = format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals)
     print(message)
     sent = send_line_message(message)
     if not sent:
@@ -501,20 +532,23 @@ def main():
 
 def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
     """
-    產生 docs/data/latest.csv，欄位固定為：證券代號,證券名稱,收盤價,漲跌幅%,類別
+    產生 docs/data/latest.csv，欄位固定為：證券代號,證券名稱,收盤價,漲跌幅%,成交股數,類別
     """
     rows = []
+    lookup = market_df.set_index(market_df["證券代號"].astype(str))
 
     for s in core_signals:
+        code = str(s["代號"])
+        volume = lookup.loc[code].get("成交股數", "") if code in lookup.index else ""
         rows.append({
             "證券代號": s["代號"],
             "證券名稱": s["名稱"],
             "收盤價": s["收盤價"],
             "漲跌幅%": s["漲跌幅%"],
+            "成交股數": volume,
             "類別": "核心自選股",
         })
 
-    lookup = market_df.set_index(market_df["證券代號"].astype(str))
     existing_codes = {str(s["代號"]) for s in core_signals}
     for category, ids in dynamic_watchlist.items():
         for stock_id in ids:
@@ -528,6 +562,7 @@ def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
                 "證券名稱": row.get("證券名稱", ""),
                 "收盤價": row.get("收盤價", ""),
                 "漲跌幅%": round(row.get("漲跌幅%", 0), 2),
+                "成交股數": row.get("成交股數", ""),
                 "類別": category,
             })
 
@@ -535,6 +570,4 @@ def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
 
 
 if __name__ == "__main__":
-    main()
-
     main()
