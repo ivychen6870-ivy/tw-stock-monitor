@@ -57,6 +57,10 @@ HISTORY_MAX_DAYS = 130
 
 # LINE / Telegram 憑證，從 GitHub Actions 的 Secrets 帶入，不要寫死在程式裡
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+
+# 測試用開關：手動觸發workflow時如果設成 "true"，會跳過真正的LINE/Telegram推播，
+# 只在log裡印出訊息內容，避免測試時浪費LINE每月200則的免費額度
+SKIP_PUSH = os.environ.get("SKIP_PUSH", "false").lower() == "true"
 LINE_TARGET_ID = os.environ.get("LINE_TARGET_ID", "")  # 使用者或群組 ID
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -728,6 +732,19 @@ def send_telegram_message(text: str) -> bool:
     return resp.status_code == 200
 
 
+def push_message(text: str):
+    """
+    統一的推播入口：如果 SKIP_PUSH=true（手動測試時可以設定），
+    只會印出訊息內容到log，不會真的發送LINE/Telegram，避免測試浪費推播額度。
+    """
+    if SKIP_PUSH:
+        print("【測試模式，未實際推播】")
+        return
+    sent = send_line_message(text)
+    if not sent:
+        send_telegram_message(text)
+
+
 # ============================================================
 # 6. 主流程
 # ============================================================
@@ -770,9 +787,7 @@ def main():
     # 6.4 推播（核心自選股 + 使用者額外關注的股票，都會被推播提醒，含買賣訊號）
     message = format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals)
     print(message)
-    sent = send_line_message(message)
-    if not sent:
-        send_telegram_message(message)
+    push_message(message)
 
     # 6.5 存檔：全市場備份（放 docs/data 底下，供之後擴充查詢用）
     today_str = datetime.now().strftime("%Y%m%d")
@@ -973,10 +988,7 @@ def intraday_main():
     lines.append("※ 盤中訊號為暫定值，以收盤後正式結果為準，僅供參考，不構成投資建議")
     message = "\n".join(lines)
     print(message)
-
-    sent = send_line_message(message)
-    if not sent:
-        send_telegram_message(message)
+    push_message(message)
 
     # 更新 latest.csv 裡「核心自選股」部分的價格，動態分類(價格異常等)維持前一次收盤後的資料不變
     latest_path = os.path.join(DATA_DIR, "latest.csv")
@@ -1013,6 +1025,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "intraday":
         intraday_main()
     else:
-        main()
-
         main()
