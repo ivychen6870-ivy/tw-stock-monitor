@@ -5,7 +5,12 @@ on:
     # 台灣時間 10:00 與 12:00 各一次
     # UTC 02:00 / 04:00 對應 台灣時間 10:00 / 12:00
     - cron: "0 2,4 * * 1-5"
-  workflow_dispatch: {}   # 允許手動觸發，方便測試
+  workflow_dispatch:   # 允許手動觸發，方便測試
+    inputs:
+      skip_push:
+        description: "測試模式：跳過實際LINE/Telegram推播（避免浪費額度），只在log看訊息內容"
+        type: boolean
+        default: false
 
 jobs:
   intraday:
@@ -30,13 +35,14 @@ jobs:
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SKIP_PUSH: ${{ github.event.inputs.skip_push || 'false' }}
         run: python monitor.py intraday
 
       - name: 把最新即時價格存回 repo
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add docs/data/latest.csv
+          git add docs/data/latest.csv docs/data/intraday_signals.json
           git diff --staged --quiet || git commit -m "盤中即時更新 $(date +%Y-%m-%d' '%H:%M)"
           git pull --rebase origin main
           git push
