@@ -84,7 +84,10 @@ def fetch_all_market_daily():
     resp = requests.get(url, timeout=15)
     resp.raise_for_status()
 
-    df = pd.read_csv(pd.io.common.StringIO(resp.text))
+    # dtype強制指定證券代號為文字，避免像 0050 這種開頭有0的代號被誤判成數字50，
+    # 導致跟股票池比對代號時對不起來、或顯示時遺失開頭的0
+    df = pd.read_csv(pd.io.common.StringIO(resp.text), dtype={"證券代號": str})
+    df["證券代號"] = df["證券代號"].str.strip()
     numeric_cols = ["成交股數", "成交金額", "開盤價", "最高價", "最低價", "收盤價", "漲跌價差", "成交筆數"]
     for col in numeric_cols:
         if col in df.columns:
