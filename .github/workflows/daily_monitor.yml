@@ -4,7 +4,12 @@ on:
   schedule:
     # UTC 06:15 = 台灣時間 14:15（收盤 13:30 後，留時間讓官方資料更新完成）
     - cron: "15 6 * * 1-5"
-  workflow_dispatch: {}   # 允許手動觸發，方便測試
+  workflow_dispatch:   # 允許手動觸發，方便測試
+    inputs:
+      skip_push:
+        description: "測試模式：跳過實際LINE/Telegram推播（避免浪費額度），只在log看訊息內容"
+        type: boolean
+        default: false
 
 jobs:
   monitor:
@@ -31,6 +36,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SKIP_PUSH: ${{ github.event.inputs.skip_push || 'false' }}
         run: python monitor.py
 
       - name: 把當日資料存回 repo
@@ -39,4 +45,5 @@ jobs:
           git config user.email "actions@github.com"
           git add docs/data/
           git diff --staged --quiet || git commit -m "更新每日市場資料 $(date +%Y-%m-%d)"
+          git pull --rebase origin main
           git push
