@@ -152,6 +152,19 @@
   .stock-card .code{font-family:var(--mono);font-size:12px;color:var(--muted);}
   .stock-card .price{font-family:var(--mono);font-size:26px;font-weight:600;margin:10px 0 4px;}
   .stock-card .chg{font-family:var(--mono);font-size:14px;font-weight:600;}
+  .limit-tag{
+    display:inline-block;
+    font-family:var(--display);
+    font-size:11px;
+    font-weight:700;
+    padding:1px 6px;
+    border-radius:4px;
+    margin-left:4px;
+    vertical-align:middle;
+  }
+  .limit-tag.limit-up{color:var(--up);background:#FDEDED;}
+  .limit-tag.limit-down{color:var(--down);background:#E9F6EE;}
+  .limit-tag.limit-flat{color:var(--text);background:var(--panel-2);}
   .stock-card.up .price, .stock-card.up .chg{color:var(--up);}
   .stock-card.down .price, .stock-card.down .chg{color:var(--down);}
   .stock-card .sparkline{margin-top:10px;width:100%;height:32px;display:block;}
@@ -282,6 +295,56 @@
   @media (max-width:640px){
     .signal-table{font-size:12px;}
     .signal-table th:nth-child(2), .signal-table td:nth-child(2){display:none;} /* 手機隱藏「判斷方式」欄，避免太擠 */
+  }
+
+  /* ===================== 可點擊展開的卡片（訊號說明、新聞） ===================== */
+  .collapse-card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    box-shadow:0 1px 2px rgba(20,20,10,0.04);
+    margin-bottom:48px;
+    overflow:hidden;
+  }
+  .collapse-summary{
+    list-style:none;
+    padding:18px 20px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    user-select:none;
+  }
+  .collapse-summary::-webkit-details-marker{display:none;}
+  .collapse-summary::marker{content:"";}
+  .section-label-inline{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+    letter-spacing:2px;
+    text-transform:uppercase;
+  }
+  .collapse-hint{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--amber);
+    white-space:nowrap;
+  }
+  .collapse-card[open] .collapse-summary{
+    border-bottom:1px solid var(--line);
+  }
+  .collapse-card .signal-guide{
+    box-shadow:none;
+    border:none;
+    margin-bottom:0;
+    border-radius:0;
+  }
+  .collapse-card .news-list{
+    box-shadow:none;
+    border:none;
+    border-radius:0;
+    margin-bottom:0;
   }
 
   /* ===================== 今日新聞 ===================== */
@@ -429,109 +492,119 @@
     </section>
 
     <section>
-      <p class="section-label">買賣訊號說明（技術分析參考，非投資建議）</p>
-      <div class="signal-guide">
-        <table class="signal-table">
-          <thead>
-            <tr><th>訊號</th><th>判斷方式</th><th>一般解讀</th><th>注意事項</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td class="sig-buy">MA黃金交叉</td>
-              <td>MA5 由下往上穿越 MA20</td>
-              <td>趨勢可能轉強，買進參考</td>
-              <td>訊號會落後於實際轉折，盤整行情容易出現假訊號</td>
-            </tr>
-            <tr>
-              <td class="sig-sell">MA死亡交叉</td>
-              <td>MA5 由上往下穿越 MA20</td>
-              <td>趨勢可能轉弱，賣出參考</td>
-              <td>不代表股價一定持續下跌，需搭配整體趨勢判斷</td>
-            </tr>
-            <tr>
-              <td class="sig-buy">KD黃金交叉</td>
-              <td>K值由下往上穿越D值</td>
-              <td>短期動能轉強，尤其在KD&lt;20時較有參考價值</td>
-              <td>股價長期單邊時KD容易「鈍化」，可靠度下降</td>
-            </tr>
-            <tr>
-              <td class="sig-sell">KD死亡交叉</td>
-              <td>K值由上往下穿越D值</td>
-              <td>短期動能轉弱，尤其在KD&gt;80時較有參考價值</td>
-              <td>強勢單邊行情中容易太早出場</td>
-            </tr>
-            <tr>
-              <td class="sig-buy">突破近20日壓力</td>
-              <td>收盤價超過近20日最高價</td>
-              <td>偏多訊號，創近期新高</td>
-              <td>建議搭配成交量確認，量沒放大可能是假突破</td>
-            </tr>
-            <tr>
-              <td class="sig-sell">跌破近20日支撐</td>
-              <td>收盤價低於近20日最低價</td>
-              <td>偏空訊號，創近期新低</td>
-              <td>同上，建議搭配量能與大盤環境一起判斷</td>
-            </tr>
-            <tr>
-              <td class="sig-buy">錘子線</td>
-              <td>下跌趨勢中出現長下影線、小實體K棒</td>
-              <td>探底訊號，偏多參考</td>
-              <td>單根K棒訊號較弱，建議等下一根確認</td>
-            </tr>
-            <tr>
-              <td class="sig-sell">吊人線</td>
-              <td>上漲趨勢中出現長下影線、小實體K棒</td>
-              <td>轉弱訊號，偏空參考</td>
-              <td>跟錘子線同形狀，靠出現位置區分意義</td>
-            </tr>
-            <tr>
-              <td class="sig-buy">多頭吞噬</td>
-              <td>下跌後，紅K實體完全包覆前一根黑K實體</td>
-              <td>多方奪回主導權，偏多參考</td>
-              <td>吞噬幅度越大、伴隨量增，可信度越高</td>
-            </tr>
-            <tr>
-              <td class="sig-sell">空頭吞噬</td>
-              <td>上漲後，黑K實體完全包覆前一根紅K實體</td>
-              <td>空方奪回主導權，偏空參考</td>
-              <td>同上，量增確認更可靠</td>
-            </tr>
-            <tr>
-              <td class="sig-buy">晨星</td>
-              <td>長黑K→小實體跳空→長紅K收深入第一根實體</td>
-              <td>底部反轉訊號，偏多參考</td>
-              <td>三根K棒組合，訊號強度優於單根型態</td>
-            </tr>
-            <tr>
-              <td class="sig-sell">暮星</td>
-              <td>長紅K→小實體跳空→長黑K收深入第一根實體</td>
-              <td>頭部反轉訊號，偏空參考</td>
-              <td>同上</td>
-            </tr>
-            <tr>
-              <td class="sig-sell">M頭/雙重頂</td>
-              <td>近期出現兩個高度相近的高點（簡化判斷）</td>
-              <td>偏空參考</td>
-              <td>這是簡化版判斷邏輯，準確度低於其他型態，容易誤判</td>
-            </tr>
-            <tr>
-              <td class="sig-buy">W底/雙重底</td>
-              <td>近期出現兩個高度相近的低點（簡化判斷）</td>
-              <td>偏多參考</td>
-              <td>同上，僅供參考</td>
-            </tr>
-          </tbody>
-        </table>
-        <p class="signal-disclaimer">
-          以上為常見技術分析參考工具，沒有任何單一指標能百分之百準確預測漲跌，
-          建議搭配基本面、籌碼面、大盤環境綜合評估，並做好資金控管。僅供參考，不構成投資建議。
-        </p>
-      </div>
+      <details class="collapse-card">
+        <summary class="collapse-summary">
+          <span class="section-label-inline">買賣訊號說明（技術分析參考，非投資建議）</span>
+          <span class="collapse-hint">點擊展開／收合</span>
+        </summary>
+        <div class="signal-guide">
+          <table class="signal-table">
+            <thead>
+              <tr><th>訊號</th><th>判斷方式</th><th>一般解讀</th><th>注意事項</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="sig-buy">MA黃金交叉</td>
+                <td>MA5 由下往上穿越 MA20</td>
+                <td>趨勢可能轉強，買進參考</td>
+                <td>訊號會落後於實際轉折，盤整行情容易出現假訊號</td>
+              </tr>
+              <tr>
+                <td class="sig-sell">MA死亡交叉</td>
+                <td>MA5 由上往下穿越 MA20</td>
+                <td>趨勢可能轉弱，賣出參考</td>
+                <td>不代表股價一定持續下跌，需搭配整體趨勢判斷</td>
+              </tr>
+              <tr>
+                <td class="sig-buy">KD黃金交叉</td>
+                <td>K值由下往上穿越D值</td>
+                <td>短期動能轉強，尤其在KD&lt;20時較有參考價值</td>
+                <td>股價長期單邊時KD容易「鈍化」，可靠度下降</td>
+              </tr>
+              <tr>
+                <td class="sig-sell">KD死亡交叉</td>
+                <td>K值由上往下穿越D值</td>
+                <td>短期動能轉弱，尤其在KD&gt;80時較有參考價值</td>
+                <td>強勢單邊行情中容易太早出場</td>
+              </tr>
+              <tr>
+                <td class="sig-buy">突破近20日壓力</td>
+                <td>收盤價超過近20日最高價</td>
+                <td>偏多訊號，創近期新高</td>
+                <td>建議搭配成交量確認，量沒放大可能是假突破</td>
+              </tr>
+              <tr>
+                <td class="sig-sell">跌破近20日支撐</td>
+                <td>收盤價低於近20日最低價</td>
+                <td>偏空訊號，創近期新低</td>
+                <td>同上，建議搭配量能與大盤環境一起判斷</td>
+              </tr>
+              <tr>
+                <td class="sig-buy">錘子線</td>
+                <td>下跌趨勢中出現長下影線、小實體K棒</td>
+                <td>探底訊號，偏多參考</td>
+                <td>單根K棒訊號較弱，建議等下一根確認</td>
+              </tr>
+              <tr>
+                <td class="sig-sell">吊人線</td>
+                <td>上漲趨勢中出現長下影線、小實體K棒</td>
+                <td>轉弱訊號，偏空參考</td>
+                <td>跟錘子線同形狀，靠出現位置區分意義</td>
+              </tr>
+              <tr>
+                <td class="sig-buy">多頭吞噬</td>
+                <td>下跌後，紅K實體完全包覆前一根黑K實體</td>
+                <td>多方奪回主導權，偏多參考</td>
+                <td>吞噬幅度越大、伴隨量增，可信度越高</td>
+              </tr>
+              <tr>
+                <td class="sig-sell">空頭吞噬</td>
+                <td>上漲後，黑K實體完全包覆前一根紅K實體</td>
+                <td>空方奪回主導權，偏空參考</td>
+                <td>同上，量增確認更可靠</td>
+              </tr>
+              <tr>
+                <td class="sig-buy">晨星</td>
+                <td>長黑K→小實體跳空→長紅K收深入第一根實體</td>
+                <td>底部反轉訊號，偏多參考</td>
+                <td>三根K棒組合，訊號強度優於單根型態</td>
+              </tr>
+              <tr>
+                <td class="sig-sell">暮星</td>
+                <td>長紅K→小實體跳空→長黑K收深入第一根實體</td>
+                <td>頭部反轉訊號，偏空參考</td>
+                <td>同上</td>
+              </tr>
+              <tr>
+                <td class="sig-sell">M頭/雙重頂</td>
+                <td>近期出現兩個高度相近的高點（簡化判斷）</td>
+                <td>偏空參考</td>
+                <td>這是簡化版判斷邏輯，準確度低於其他型態，容易誤判</td>
+              </tr>
+              <tr>
+                <td class="sig-buy">W底/雙重底</td>
+                <td>近期出現兩個高度相近的低點（簡化判斷）</td>
+                <td>偏多參考</td>
+                <td>同上，僅供參考</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="signal-disclaimer">
+            以上為常見技術分析參考工具，沒有任何單一指標能百分之百準確預測漲跌，
+            建議搭配基本面、籌碼面、大盤環境綜合評估，並做好資金控管。僅供參考，不構成投資建議。
+          </p>
+        </div>
+      </details>
     </section>
 
     <section>
-      <p class="section-label">今日新聞（公開資訊觀測站重大訊息）</p>
-      <div class="news-list" id="newsList"></div>
+      <details class="collapse-card">
+        <summary class="collapse-summary">
+          <span class="section-label-inline">今日新聞（公開資訊觀測站重大訊息）</span>
+          <span class="collapse-hint">點擊展開／收合</span>
+        </summary>
+        <div class="news-list" id="newsList"></div>
+      </details>
     </section>
 
     <section>
@@ -745,6 +818,17 @@ function formatVolume(shares){
 function buildStockCardHtml(r, history, signals){
   const dir = r.chg >= 0 ? "up" : "down";
   const sign = r.chg >= 0 ? "+" : "";
+
+  // 漲停/跌停/平盤標示：台股一般股票漲跌幅上限約±10%，這裡用接近10%當作判斷依據
+  let limitTag = "";
+  if(r.chg >= 9.5){
+    limitTag = `<span class="limit-tag limit-up">漲停</span>`;
+  }else if(r.chg <= -9.5){
+    limitTag = `<span class="limit-tag limit-down">跌停</span>`;
+  }else if(r.chg === 0){
+    limitTag = `<span class="limit-tag limit-flat">平盤</span>`;
+  }
+
   const hist = history[r.code];
   let sparkHtml = `<p class="sparkline-empty">尚無多日歷史資料</p>`;
   if(hist && hist.length >= 2){
@@ -765,7 +849,7 @@ function buildStockCardHtml(r, history, signals){
   return `<div class="stock-card ${dir}">
     <p class="name">${r.name} <span class="code">${r.code}</span></p>
     <p class="price">${r.price}</p>
-    <p class="chg">${sign}${r.chgAmount.toFixed(2)}　${sign}${r.chg.toFixed(2)}%</p>
+    <p class="chg">${sign}${r.chgAmount.toFixed(2)}　${sign}${r.chg.toFixed(2)}% ${limitTag}</p>
     ${sparkHtml}
     <p class="volume-line">成交量：${formatVolume(r.volume)}</p>
     ${badgeHtml}
@@ -921,4 +1005,3 @@ function setupWatchForm(watchlist){
 
 </body>
 </html>
-
