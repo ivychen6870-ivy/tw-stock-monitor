@@ -125,6 +125,20 @@
     gap:14px;
     margin-bottom:48px;
   }
+  .dynamic-card-grid{
+    display:grid;
+    grid-template-columns:repeat(5, 1fr);
+    gap:10px;
+  }
+  @media (max-width:900px){
+    .dynamic-card-grid{grid-template-columns:repeat(3, 1fr);}
+  }
+  @media (max-width:640px){
+    .dynamic-card-grid{grid-template-columns:repeat(2, 1fr);}
+  }
+  .dynamic-card-grid .stock-card{padding:12px;}
+  .dynamic-card-grid .stock-card .price{font-size:19px;}
+  .dynamic-card-grid .stock-card .name{font-size:11.5px;}
   .stock-card{
     background:var(--panel);
     border:1px solid var(--line);
@@ -458,6 +472,54 @@
               <td>偏空訊號，創近期新低</td>
               <td>同上，建議搭配量能與大盤環境一起判斷</td>
             </tr>
+            <tr>
+              <td class="sig-buy">錘子線</td>
+              <td>下跌趨勢中出現長下影線、小實體K棒</td>
+              <td>探底訊號，偏多參考</td>
+              <td>單根K棒訊號較弱，建議等下一根確認</td>
+            </tr>
+            <tr>
+              <td class="sig-sell">吊人線</td>
+              <td>上漲趨勢中出現長下影線、小實體K棒</td>
+              <td>轉弱訊號，偏空參考</td>
+              <td>跟錘子線同形狀，靠出現位置區分意義</td>
+            </tr>
+            <tr>
+              <td class="sig-buy">多頭吞噬</td>
+              <td>下跌後，紅K實體完全包覆前一根黑K實體</td>
+              <td>多方奪回主導權，偏多參考</td>
+              <td>吞噬幅度越大、伴隨量增，可信度越高</td>
+            </tr>
+            <tr>
+              <td class="sig-sell">空頭吞噬</td>
+              <td>上漲後，黑K實體完全包覆前一根紅K實體</td>
+              <td>空方奪回主導權，偏空參考</td>
+              <td>同上，量增確認更可靠</td>
+            </tr>
+            <tr>
+              <td class="sig-buy">晨星</td>
+              <td>長黑K→小實體跳空→長紅K收深入第一根實體</td>
+              <td>底部反轉訊號，偏多參考</td>
+              <td>三根K棒組合，訊號強度優於單根型態</td>
+            </tr>
+            <tr>
+              <td class="sig-sell">暮星</td>
+              <td>長紅K→小實體跳空→長黑K收深入第一根實體</td>
+              <td>頭部反轉訊號，偏空參考</td>
+              <td>同上</td>
+            </tr>
+            <tr>
+              <td class="sig-sell">M頭/雙重頂</td>
+              <td>近期出現兩個高度相近的高點（簡化判斷）</td>
+              <td>偏空參考</td>
+              <td>這是簡化版判斷邏輯，準確度低於其他型態，容易誤判</td>
+            </tr>
+            <tr>
+              <td class="sig-buy">W底/雙重底</td>
+              <td>近期出現兩個高度相近的低點（簡化判斷）</td>
+              <td>偏多參考</td>
+              <td>同上，僅供參考</td>
+            </tr>
           </tbody>
         </table>
         <p class="signal-disclaimer">
@@ -620,6 +682,25 @@ async function loadSignals(){
   }
 }
 
+async function loadIntradaySignals(){
+  try{
+    const res = await fetch("data/intraday_signals.json", { cache:"no-store" });
+    if(!res.ok) throw new Error("no file");
+    return await res.json();
+  }catch(e){
+    return {};
+  }
+}
+
+function mergeSignals(daily, intraday){
+  const merged = {};
+  const codes = new Set([...Object.keys(daily||{}), ...Object.keys(intraday||{})]);
+  codes.forEach(code => {
+    merged[code] = [...(daily[code]||[]), ...(intraday[code]||[])];
+  });
+  return merged;
+}
+
 function renderTicker(rows){
   const track = document.getElementById("tickerTrack");
   const items = rows.map(r => {
@@ -703,7 +784,7 @@ function renderDynamic(rows, history, signals){
     return `
       <div class="dynamic-category">
         <p class="section-label dynamic-sub-label">${cat}（命中 ${items.length} 檔）</p>
-        <div class="core-grid">${cardsHtml}</div>
+        <div class="dynamic-card-grid">${cardsHtml}</div>
       </div>`;
   }).join("");
 }
@@ -816,9 +897,10 @@ function setupWatchForm(watchlist){
 }
 
 (async function init(){
-  const [rows, history, news, watchlist, signals] = await Promise.all([
-    loadStockData(), loadHistory(), loadNews(), loadWatchlist(), loadSignals(),
+  const [rows, history, news, watchlist, dailySignals, intradaySignals] = await Promise.all([
+    loadStockData(), loadHistory(), loadNews(), loadWatchlist(), loadSignals(), loadIntradaySignals(),
   ]);
+  const signals = mergeSignals(dailySignals, intradaySignals);
   document.getElementById("dataDate").textContent = new Date().toLocaleDateString("zh-TW");
   renderTicker(rows);
   renderCore(rows, history, signals);
@@ -830,4 +912,6 @@ function setupWatchForm(watchlist){
 </script>
 
 </body>
+</html>
+
 </html>
