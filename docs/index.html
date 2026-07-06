@@ -578,14 +578,14 @@ const GITHUB_REPO = "ivychen6870-ivy/tw-stock-monitor";
 */
 
 const DEMO_DATA = [
-  { code:"2330", name:"台積電", price:1015, chg:1.2, volume:18590000, category:"核心自選股" },
-  { code:"2317", name:"鴻海",   price:186,  chg:-0.8, volume:9200000, category:"核心自選股" },
-  { code:"2454", name:"聯發科", price:1320, chg:2.1, volume:4300000, category:"核心自選股" },
-  { code:"0050", name:"元大台灣50", price:198, chg:0.3, volume:6100000, category:"核心自選股" },
-  { code:"3231", name:"緯創",   price:215,  chg:6.4, volume:32000000, category:"價格異常" },
-  { code:"2603", name:"長榮",   price:198,  chg:-5.3, volume:28000000, category:"價格異常" },
-  { code:"6488", name:"環球晶", price:512,  chg:3.9, volume:5200000, category:"成交量異常" },
-  { code:"2382", name:"廣達",   price:298,  chg:1.1, volume:15000000, category:"熱度潛力股" },
+  { code:"2330", name:"台積電", price:1015, chg:1.2, chgAmount:12, volume:18590000, category:"核心自選股" },
+  { code:"2317", name:"鴻海",   price:186,  chg:-0.8, chgAmount:-1.5, volume:9200000, category:"核心自選股" },
+  { code:"2454", name:"聯發科", price:1320, chg:2.1, chgAmount:27, volume:4300000, category:"核心自選股" },
+  { code:"0050", name:"元大台灣50", price:198, chg:0.3, chgAmount:0.6, volume:6100000, category:"核心自選股" },
+  { code:"3231", name:"緯創",   price:215,  chg:6.4, chgAmount:12.9, volume:32000000, category:"價格異常" },
+  { code:"2603", name:"長榮",   price:198,  chg:-5.3, chgAmount:-11.1, volume:28000000, category:"價格異常" },
+  { code:"6488", name:"環球晶", price:512,  chg:3.9, chgAmount:19.2, volume:5200000, category:"成交量異常" },
+  { code:"2382", name:"廣達",   price:298,  chg:1.1, chgAmount:3.2, volume:15000000, category:"熱度潛力股" },
 ];
 
 function buildDemoHistory(base){
@@ -617,8 +617,15 @@ const DEMO_NEWS = [
 
 const DEMO_WATCHLIST = { core:["2330","2317","2454","0050"], extra:[] };
 
+// 每次頁面載入時產生一個固定的快取破壞參數，讓所有資料檔案的網址都變成「全新的」，
+// 這樣瀏覽器或 GitHub Pages 的 CDN 都不會用到舊版快取，一定會抓最新的檔案內容。
+const CACHE_BUSTER = Date.now();
+function withCacheBuster(path){
+  return path + (path.includes("?") ? "&" : "?") + "_=" + CACHE_BUSTER;
+}
+
 async function loadCsv(path){
-  const res = await fetch(path, { cache:"no-store" });
+  const res = await fetch(withCacheBuster(path), { cache:"no-store" });
   if(!res.ok) throw new Error("no file: " + path);
   const text = await res.text();
   return Papa.parse(text, { header:true, skipEmptyLines:true }).data;
@@ -631,6 +638,7 @@ async function loadStockData(){
     return rows.map(r => ({
       code: r["證券代號"], name: r["證券名稱"],
       price: parseFloat(r["收盤價"]), chg: parseFloat(r["漲跌幅%"]),
+      chgAmount: parseFloat(r["漲跌金額"]) || 0,
       volume: parseInt(r["成交股數"], 10) || 0,
       category: r["類別"] || "動態觀察",
     }));
@@ -642,7 +650,7 @@ async function loadStockData(){
 
 async function loadHistory(){
   try{
-    const res = await fetch("data/history.json", { cache:"no-store" });
+    const res = await fetch(withCacheBuster("data/history.json"), { cache:"no-store" });
     if(!res.ok) throw new Error("no file");
     const data = await res.json();
     if(Object.keys(data).length === 0) throw new Error("empty");
@@ -664,7 +672,7 @@ async function loadNews(){
 
 async function loadWatchlist(){
   try{
-    const res = await fetch("data/watchlist.json", { cache:"no-store" });
+    const res = await fetch(withCacheBuster("data/watchlist.json"), { cache:"no-store" });
     if(!res.ok) throw new Error("no file");
     return await res.json();
   }catch(e){
@@ -674,7 +682,7 @@ async function loadWatchlist(){
 
 async function loadSignals(){
   try{
-    const res = await fetch("data/signals.json", { cache:"no-store" });
+    const res = await fetch(withCacheBuster("data/signals.json"), { cache:"no-store" });
     if(!res.ok) throw new Error("no file");
     return await res.json();
   }catch(e){
@@ -684,7 +692,7 @@ async function loadSignals(){
 
 async function loadIntradaySignals(){
   try{
-    const res = await fetch("data/intraday_signals.json", { cache:"no-store" });
+    const res = await fetch(withCacheBuster("data/intraday_signals.json"), { cache:"no-store" });
     if(!res.ok) throw new Error("no file");
     return await res.json();
   }catch(e){
@@ -757,7 +765,7 @@ function buildStockCardHtml(r, history, signals){
   return `<div class="stock-card ${dir}">
     <p class="name">${r.name} <span class="code">${r.code}</span></p>
     <p class="price">${r.price}</p>
-    <p class="chg">${sign}${r.chg.toFixed(2)}%</p>
+    <p class="chg">${sign}${r.chgAmount.toFixed(2)}　${sign}${r.chg.toFixed(2)}%</p>
     ${sparkHtml}
     <p class="volume-line">成交量：${formatVolume(r.volume)}</p>
     ${badgeHtml}
@@ -914,4 +922,3 @@ function setupWatchForm(watchlist){
 </body>
 </html>
 
-</html>
