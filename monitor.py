@@ -659,6 +659,7 @@ def compute_simple_signals(market_df: pd.DataFrame, stock_ids: list):
             "名稱": row.get("證券名稱", ""),
             "收盤價": row["收盤價"],
             "漲跌幅%": round(row.get("漲跌幅%", 0), 2),
+            "漲跌金額": round(row.get("漲跌價差", 0), 2),
         })
     return signals
 
@@ -674,7 +675,9 @@ def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=
     lines.append("【核心自選股】")
     for s in core_signals:
         code = str(s['代號'])
-        line = f"{code} {s['名稱']}：{s['收盤價']}（{s['漲跌幅%']}%）"
+        chg_amount = s.get('漲跌金額', 0)
+        sign = "+" if chg_amount >= 0 else ""
+        line = f"{code} {s['名稱']}：{s['收盤價']}（{sign}{chg_amount} / {s['漲跌幅%']}%）"
         if buy_sell_signals and buy_sell_signals.get(code):
             line += "\n　　⚡ " + "、".join(buy_sell_signals[code])
         lines.append(line)
@@ -693,7 +696,9 @@ def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=
             name = row.get("證券名稱", "")
             price = row.get("收盤價", "")
             chg = round(row.get("漲跌幅%", 0), 2)
-            lines.append(f"{stock_id} {name}：{price}（{chg}%）")
+            chg_amount = round(row.get("漲跌價差", 0), 2)
+            sign = "+" if chg_amount >= 0 else ""
+            lines.append(f"{stock_id} {name}：{price}（{sign}{chg_amount} / {chg}%）")
         lines.append("")
 
     lines.append("※ 以上訊號僅供參考，不構成投資建議")
@@ -786,7 +791,7 @@ def main():
 
 def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
     """
-    產生 docs/data/latest.csv，欄位固定為：證券代號,證券名稱,收盤價,漲跌幅%,成交股數,類別
+    產生 docs/data/latest.csv，欄位固定為：證券代號,證券名稱,收盤價,漲跌幅%,漲跌金額,成交股數,類別
     """
     rows = []
     lookup = market_df.set_index(market_df["證券代號"].astype(str))
@@ -799,6 +804,7 @@ def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
             "證券名稱": s["名稱"],
             "收盤價": s["收盤價"],
             "漲跌幅%": s["漲跌幅%"],
+            "漲跌金額": s.get("漲跌金額", 0),
             "成交股數": volume,
             "類別": "核心自選股",
         })
@@ -816,6 +822,7 @@ def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
                 "證券名稱": row.get("證券名稱", ""),
                 "收盤價": row.get("收盤價", ""),
                 "漲跌幅%": round(row.get("漲跌幅%", 0), 2),
+                "漲跌金額": round(row.get("漲跌價差", 0), 2),
                 "成交股數": row.get("成交股數", ""),
                 "類別": category,
             })
@@ -854,6 +861,7 @@ def fetch_realtime_quotes(stock_ids: list) -> dict:
         except (TypeError, ValueError):
             prev_close = None
         chg_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
+        chg_amount = round(price - prev_close, 2) if prev_close else 0
 
         # 當日至今的盤中最高/最低，KD跟支撐壓力判斷會用到；抓不到就先用目前價格頂替
         try:
@@ -866,7 +874,7 @@ def fetch_realtime_quotes(stock_ids: list) -> dict:
             low = price
 
         quotes[code] = {
-            "name": item.get("n", ""), "price": price, "chg_pct": chg_pct,
+            "name": item.get("n", ""), "price": price, "chg_pct": chg_pct, "chg_amount": chg_amount,
             "high": high, "low": low,
         }
     return quotes
@@ -956,7 +964,8 @@ def intraday_main():
         q = quotes.get(code)
         if not q:
             continue
-        line = f"{code} {q['name']}：{q['price']}（{q['chg_pct']}%）"
+        sign = "+" if q["chg_amount"] >= 0 else ""
+        line = f"{code} {q['name']}：{q['price']}（{sign}{q['chg_amount']} / {q['chg_pct']}%）"
         if intraday_signals.get(code):
             line += "\n　　⚡ " + "、".join(intraday_signals[code])
         lines.append(line)
@@ -974,7 +983,7 @@ def intraday_main():
     if os.path.exists(latest_path):
         df = pd.read_csv(latest_path)
     else:
-        df = pd.DataFrame(columns=["證券代號", "證券名稱", "收盤價", "漲跌幅%", "成交股數", "類別"])
+        df = pd.DataFrame(columns=["證券代號", "證券名稱", "收盤價", "漲跌幅%", "漲跌金額", "成交股數", "類別"])
 
     for code in watch_ids:
         q = quotes.get(code)
@@ -984,10 +993,11 @@ def intraday_main():
         if mask.any():
             df.loc[mask, "收盤價"] = q["price"]
             df.loc[mask, "漲跌幅%"] = q["chg_pct"]
+            df.loc[mask, "漲跌金額"] = q["chg_amount"]
         else:
             new_row = pd.DataFrame([{
                 "證券代號": code, "證券名稱": q["name"], "收盤價": q["price"],
-                "漲跌幅%": q["chg_pct"], "成交股數": "", "類別": "核心自選股",
+                "漲跌幅%": q["chg_pct"], "漲跌金額": q["chg_amount"], "成交股數": "", "類別": "核心自選股",
             }])
             df = pd.concat([df, new_row], ignore_index=True)
 
@@ -1003,4 +1013,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "intraday":
         intraday_main()
     else:
+        main()
+
         main()
