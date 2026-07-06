@@ -294,11 +294,98 @@ def compute_kd(highs: list, lows: list, closes: list, period: int = 9):
     return k_list, d_list
 
 
+def fetch_dividend_events(stock_id: str, start_date: str, end_date: str) -> list:
+    """
+    抓取指定股票在區間內的除權息事件（免費，證交所TWT49U端點）。
+    回傳依日期排序：[{"date":"2026-06-15","cash_dividend":2.5,"stock_dividend_rate":0.0}, ...]
+
+    ⚠️ 這個端點沒有正式的欄位文件，是用「欄位名稱關鍵字比對」的方式盡量抓對，
+    如果證交所改版格式，這裡會安靜地回傳空清單，不會讓整個系統掛掉，
+    但代表「還原股價」這個功能當下沒有生效，股價會退回原始未調整版本。
+    """
+    url = "https://www.twse.com.tw/exchangeReport/TWT49U"
+    params = {"response": "json", "strDate": start_date, "endDate": end_date}
+    try:
+        resp = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"抓取除權息資料失敗（{stock_id}）：{e}")
+        return []
+
+    fields = data.get("fields", [])
+    rows_raw = data.get("data", [])
+    if not fields or not rows_raw:
+        return []
+
+    def find_col(*keywords):
+        for i, f in enumerate(fields):
+            if all(k in f for k in keywords):
+                return i
+        return None
+
+    idx_date = find_col("日期")
+    idx_code = find_col("代號")
+    idx_cash = find_col("現金股利")
+    idx_stock_rate = find_col("無償配股")
+
+    events = []
+    for row in rows_raw:
+        try:
+            if idx_code is None or row[idx_code].strip() != str(stock_id):
+                continue
+            roc_date = row[idx_date]
+            y, m, d = roc_date.split("/")
+            ex_date = f"{int(y) + 1911}-{int(m):02d}-{int(d):02d}"
+            cash_raw = row[idx_cash].replace(",", "") if idx_cash is not None else ""
+            cash = float(cash_raw) if cash_raw not in ("", "-") else 0.0
+            rate_raw = row[idx_stock_rate].replace(",", "") if idx_stock_rate is not None else ""
+            stock_rate = (float(rate_raw) / 1000) if rate_raw not in ("", "-") else 0.0
+            events.append({"date": ex_date, "cash_dividend": cash, "stock_dividend_rate": stock_rate})
+        except (ValueError, IndexError, AttributeError, KeyError):
+            continue
+
+    return sorted(events, key=lambda e: e["date"])
+
+
+def adjust_series_for_dividends(series: list, events: list) -> list:
+    """
+    還原股價（回溯調整法）：對每一次除權息事件，往回把「除權息日之前」的所有OHLC
+    乘上一個調整係數，讓價格連續，不會因為配股配息而出現假的跳空缺口。
+    公式參考證交所公告：除權息參考價 = (除權息前收盤價 - 現金股利) / (1 + 無償配股率)
+    最新的價格維持不變（不是真的可以交易的「還原價」，純粹是用來讓技術指標判斷更準確）。
+    """
+    if not events:
+        return series
+    series = [dict(s) for s in series]  # 複製一份，不動到原始資料
+    for ev in sorted(events, key=lambda e: e["date"], reverse=True):
+        ex_date = ev["date"]
+        prior = [s for s in series if s["date"] < ex_date]
+        if not prior:
+            continue
+        prev_close = prior[-1]["close"]
+        if prev_close <= 0:
+            continue
+        ex_price = (prev_close - ev.get("cash_dividend", 0)) / (1 + ev.get("stock_dividend_rate", 0))
+        if ex_price <= 0:
+            continue
+        ratio = ex_price / prev_close
+        for s in series:
+            if s["date"] < ex_date:
+                s["open"] = round(s["open"] * ratio, 2)
+                s["high"] = round(s["high"] * ratio, 2)
+                s["low"] = round(s["low"] * ratio, 2)
+                s["close"] = round(s["close"] * ratio, 2)
+    return series
+
 def update_price_history(market_df: pd.DataFrame, watch_ids: list) -> dict:
     """
     讀取既有的 docs/data/history.json，把今天監控股票的 OHLC 加進去，
     重新計算 MA5 / MA20 / KD，存回檔案，供網頁畫 K 線圖使用。
     watch_ids：核心自選股 + 已核准的關注股票，這些才會有完整OHLC歷史。
+
+    每次執行也會檢查「今天」是不是這檔股票的除權息日，如果是，
+    會自動把歷史資料往回做「還原股價」調整，避免除權息造成的假交叉訊號。
     """
     path = os.path.join(DATA_DIR, HISTORY_FILE_NAME)
     history = {}
@@ -310,6 +397,7 @@ def update_price_history(market_df: pd.DataFrame, watch_ids: list) -> dict:
             history = {}
 
     today = datetime.now().strftime("%Y-%m-%d")
+    today_str_compact = datetime.now().strftime("%Y%m%d")
     lookup = market_df.set_index(market_df["證券代號"].astype(str))
 
     for stock_id in watch_ids:
@@ -322,11 +410,20 @@ def update_price_history(market_df: pd.DataFrame, watch_ids: list) -> dict:
             "high": float(row.get("最高價", 0) or 0),
             "low": float(row.get("最低價", 0) or 0),
             "close": float(row.get("收盤價", 0) or 0),
+            "volume": float(row.get("成交股數", 0) or 0),
         }
         series = history.get(stock_id, [])
         series = [h for h in series if h["date"] != today]  # 避免同日重複執行造成重複
         series.append(entry)
         series = series[-HISTORY_MAX_DAYS:]
+
+        # 檢查今天是否為除權息日，若是則回溯調整過去的價格（還原股價）
+        try:
+            events_today = fetch_dividend_events(stock_id, today_str_compact, today_str_compact)
+            if events_today:
+                series = adjust_series_for_dividends(series, events_today)
+        except Exception as e:
+            print(f"{stock_id} 除權息調整檢查失敗，略過本次調整：{e}")
 
         closes = [h["close"] for h in series]
         highs = [h["high"] for h in series]
@@ -349,14 +446,155 @@ def update_price_history(market_df: pd.DataFrame, watch_ids: list) -> dict:
     return history
 
 
+def _candle_body(c):
+    return abs(c["close"] - c["open"])
+
+
+def _is_bullish_candle(c):
+    return c["close"] > c["open"]
+
+
+def _upper_shadow(c):
+    return c["high"] - max(c["open"], c["close"])
+
+
+def _lower_shadow(c):
+    return min(c["open"], c["close"]) - c["low"]
+
+
+def _is_hammer_shape(c):
+    """判斷K棒外型是否符合「錘子/吊人」的形狀：長下影線、小實體、幾乎沒有上影線"""
+    total_range = c["high"] - c["low"]
+    if total_range <= 0:
+        return False
+    body = _candle_body(c)
+    lower = _lower_shadow(c)
+    upper = _upper_shadow(c)
+    return lower >= body * 2 and upper <= body * 0.5 and (body / total_range) < 0.4
+
+
+def _trend_direction(series, window=5):
+    """簡易趨勢判斷：目前收盤價 vs N天前收盤價"""
+    if len(series) <= window:
+        return None
+    now_close = series[-1]["close"]
+    past_close = series[-1 - window]["close"]
+    if now_close > past_close:
+        return "up"
+    elif now_close < past_close:
+        return "down"
+    return None
+
+
+def detect_candlestick_patterns(series: list) -> list:
+    """
+    偵測常見的K線型態（單根/雙根/三根K棒組合），回傳命中的型態文字清單。
+    這些型態都是「機率性參考」，不保證未來走勢，建議搭配成交量、均線一起看。
+    """
+    hits = []
+    if len(series) < 2:
+        return hits
+
+    trend = _trend_direction(series)
+    today = series[-1]
+
+    # 錘子線 / 吊人線（同樣的形狀，依趨勢位置決定意義）
+    if _is_hammer_shape(today):
+        if trend == "down":
+            hits.append("錘子線（下跌後出現，偏多參考）")
+        elif trend == "up":
+            hits.append("吊人線（上漲後出現，偏空參考）")
+
+    # 多頭吞噬 / 空頭吞噬
+    if len(series) >= 2:
+        prev = series[-2]
+        prev_body_low = min(prev["open"], prev["close"])
+        prev_body_high = max(prev["open"], prev["close"])
+        today_body_low = min(today["open"], today["close"])
+        today_body_high = max(today["open"], today["close"])
+
+        engulfs = today_body_low <= prev_body_low and today_body_high >= prev_body_high
+        if engulfs and not _is_bullish_candle(prev) and _is_bullish_candle(today) and trend == "down":
+            hits.append("多頭吞噬（偏多參考）")
+        elif engulfs and _is_bullish_candle(prev) and not _is_bullish_candle(today) and trend == "up":
+            hits.append("空頭吞噬（偏空參考）")
+
+    # 晨星 / 暮星（三根K棒組合）
+    if len(series) >= 3:
+        c1, c2, c3 = series[-3], series[-2], series[-1]
+        c1_body = _candle_body(c1)
+        c2_body = _candle_body(c2)
+        c1_mid = (c1["open"] + c1["close"]) / 2
+
+        # 晨星：長黑K -> 小實體(跳空向下) -> 長紅K收盤深入第一根實體內
+        if (not _is_bullish_candle(c1) and c1_body > 0 and c2_body < c1_body * 0.4
+                and max(c2["open"], c2["close"]) < c1["close"]
+                and _is_bullish_candle(c3) and c3["close"] > c1_mid
+                and trend == "down"):
+            hits.append("晨星（三K棒組合，偏多參考）")
+
+        # 暮星：長紅K -> 小實體(跳空向上) -> 長黑K收盤深入第一根實體內
+        if (_is_bullish_candle(c1) and c1_body > 0 and c2_body < c1_body * 0.4
+                and min(c2["open"], c2["close"]) > c1["close"]
+                and not _is_bullish_candle(c3) and c3["close"] < c1_mid
+                and trend == "up"):
+            hits.append("暮星（三K棒組合，偏空參考）")
+
+    return hits
+
+
+def detect_chart_patterns(series: list, lookback: int = 40, tolerance: float = 0.03) -> list:
+    """
+    簡化版的雙重頂(M頭)/雙重底(W底)偵測。
+    ⚠️ 這是簡化的高低點比對邏輯，不是嚴謹的圖形辨識演算法，
+    準確度低於前面的K線組合型態，容易有誤判，僅供參考。
+    頭肩頂/頭肩底這類需要判斷三個轉折點的型態，這裡沒有做，
+    因為誤判機率更高，暫時不建議自動化判斷。
+    """
+    hits = []
+    window = series[-lookback:] if len(series) > lookback else series
+    if len(window) < 15:
+        return hits
+
+    closes = [h["close"] for h in window]
+    highest = max(closes)
+    highest_idx = closes.index(highest)
+    lowest = min(closes)
+    lowest_idx = closes.index(lowest)
+
+    # 雙重頂（M頭）：找第二個接近前波高點的高點，且中間有明顯拉回
+    for i in range(highest_idx + 5, len(closes)):
+        if abs(closes[i] - highest) / highest <= tolerance:
+            trough = min(closes[highest_idx:i]) if i > highest_idx else None
+            if trough and (highest - trough) / highest >= 0.05:
+                hits.append("M頭/雙重頂型態（簡化判斷，偏空參考）")
+            break
+
+    # 雙重底（W底）：找第二個接近前波低點的低點，且中間有明顯反彈
+    for i in range(lowest_idx + 5, len(closes)):
+        if lowest > 0 and abs(closes[i] - lowest) / lowest <= tolerance:
+            peak = max(closes[lowest_idx:i]) if i > lowest_idx else None
+            if peak and (peak - lowest) / lowest >= 0.05:
+                hits.append("W底/雙重底型態（簡化判斷，偏多參考）")
+            break
+
+    return hits
+
+
 def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int = 20) -> dict:
     """
     針對監控股票，比對「今天 vs 昨天」的技術指標狀態，偵測三種訊號：
     - 均線交叉：MA5 穿越 MA20（黃金交叉＝買進參考／死亡交叉＝賣出參考）
     - KD交叉：K線穿越D線（黃金交叉＝買進參考／死亡交叉＝賣出參考）
     - 支撐/壓力突破：今日收盤價突破近N日高點（偏多）或跌破近N日低點（偏空）
+
+    每個訊號都會加註是否有「放量確認」：業界常見標準是當日成交量達到
+    近5日均量的1.5倍以上，視為放量，訊號可信度較高；沒放量則標示「量能未明顯放大」。
+
     回傳 { 股票代號: [訊號文字, ...] }，僅供參考，不構成投資建議。
     """
+    VOLUME_CONFIRM_MULTIPLIER = 1.5
+
     signals = {}
     for stock_id in watch_ids:
         series = history.get(stock_id, [])
@@ -366,19 +604,31 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
         today, yesterday = series[-1], series[-2]
         hits = []
 
+        # 成交量確認：今日量 vs 前5日均量（不含今天）
+        volume_note = ""
+        prior_5 = series[-6:-1]
+        today_volume = today.get("volume")
+        if len(prior_5) == 5 and today_volume:
+            avg5_volume = sum(h.get("volume", 0) for h in prior_5) / 5
+            if avg5_volume > 0:
+                if today_volume >= avg5_volume * VOLUME_CONFIRM_MULTIPLIER:
+                    volume_note = "，有放量確認"
+                else:
+                    volume_note = "，量能未明顯放大"
+
         # 均線交叉
         if all(v is not None for v in [today.get("ma5"), today.get("ma20"), yesterday.get("ma5"), yesterday.get("ma20")]):
             if yesterday["ma5"] <= yesterday["ma20"] and today["ma5"] > today["ma20"]:
-                hits.append("MA黃金交叉（買進參考）")
+                hits.append(f"MA黃金交叉（買進參考{volume_note}）")
             elif yesterday["ma5"] >= yesterday["ma20"] and today["ma5"] < today["ma20"]:
-                hits.append("MA死亡交叉（賣出參考）")
+                hits.append(f"MA死亡交叉（賣出參考{volume_note}）")
 
         # KD交叉
         if all(v is not None for v in [today.get("k"), today.get("d"), yesterday.get("k"), yesterday.get("d")]):
             if yesterday["k"] <= yesterday["d"] and today["k"] > today["d"]:
-                hits.append("KD黃金交叉（買進參考）")
+                hits.append(f"KD黃金交叉（買進參考{volume_note}）")
             elif yesterday["k"] >= yesterday["d"] and today["k"] < today["d"]:
-                hits.append("KD死亡交叉（賣出參考）")
+                hits.append(f"KD死亡交叉（賣出參考{volume_note}）")
 
         # 支撐/壓力突破：用「今天以前」的近N日高低點來比對，避免用到今天自己的高低價
         prior = series[-(breakout_window + 1):-1]
@@ -386,9 +636,13 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
             recent_high = max(h["high"] for h in prior)
             recent_low = min(h["low"] for h in prior)
             if today["close"] > recent_high:
-                hits.append(f"突破近{breakout_window}日壓力（偏多參考）")
+                hits.append(f"突破近{breakout_window}日壓力（偏多參考{volume_note}）")
             elif today["close"] < recent_low:
-                hits.append(f"跌破近{breakout_window}日支撐（偏空參考）")
+                hits.append(f"跌破近{breakout_window}日支撐（偏空參考{volume_note}）")
+
+        # K線型態（錘子/吊人/吞噬/晨星暮星）+ 簡化版雙重頂底
+        hits.extend(detect_candlestick_patterns(series))
+        hits.extend(detect_chart_patterns(series))
 
         if hits:
             signals[stock_id] = hits
@@ -569,5 +823,184 @@ def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
     pd.DataFrame(rows).to_csv(os.path.join(DATA_DIR, "latest.csv"), index=False, encoding="utf-8-sig")
 
 
+def fetch_realtime_quotes(stock_ids: list) -> dict:
+    """
+    抓取盤中即時報價（免費，證交所基本市況報導網站，非官方文件化的內部端點，
+    穩定性不像 OpenAPI 那麼有保障，若失敗會回傳空字典，呼叫端要自行處理）。
+    只查詢傳入的股票代號，不涵蓋全市場，所以只適合用在「核心自選股/關注股票」這種數量有限的清單。
+    回傳 { 代號: {"name":..., "price":..., "chg_pct":..., "high":..., "low":...} }
+    """
+    if not stock_ids:
+        return {}
+    query = "|".join(f"tse_{c}.tw" for c in stock_ids)
+    url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={query}&json=1&delay=0"
+    try:
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"抓取盤中即時報價失敗：{e}")
+        return {}
+
+    quotes = {}
+    for item in data.get("msgArray", []):
+        code = item.get("c")
+        try:
+            price = float(item.get("z"))
+        except (TypeError, ValueError):
+            continue  # 尚未成交或非交易時段，沒有最新成交價
+        try:
+            prev_close = float(item.get("y"))
+        except (TypeError, ValueError):
+            prev_close = None
+        chg_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
+
+        # 當日至今的盤中最高/最低，KD跟支撐壓力判斷會用到；抓不到就先用目前價格頂替
+        try:
+            high = float(item.get("h"))
+        except (TypeError, ValueError):
+            high = price
+        try:
+            low = float(item.get("l"))
+        except (TypeError, ValueError):
+            low = price
+
+        quotes[code] = {
+            "name": item.get("n", ""), "price": price, "chg_pct": chg_pct,
+            "high": high, "low": low,
+        }
+    return quotes
+
+
+def detect_intraday_signals(quotes: dict, history: dict, watch_ids: list, breakout_window: int = 20) -> dict:
+    """
+    盤中訊號偵測：把「目前即時價格」當作假設的今日收盤價，重新算一次MA5/MA20/KD，
+    跟歷史資料裡「昨天收盤時算出的數值」比對，看有沒有觸發交叉或突破。
+
+    ⚠️ 這些是「暫定」訊號，因為股價在收盤前還可能變動，跟收盤後正式算出來的結果不一定一樣，
+    純粹是提早讓你知道「目前這個時間點看起來像是要交叉了」，還是要等收盤確認。
+    """
+    signals = {}
+    for stock_id in watch_ids:
+        series = history.get(stock_id, [])
+        q = quotes.get(stock_id)
+        if not series or not q:
+            continue
+
+        prev = series[-1]  # 昨天收盤算出的指標值
+        closes = [h["close"] for h in series] + [q["price"]]
+        highs = [h["high"] for h in series] + [q["high"]]
+        lows = [h["low"] for h in series] + [q["low"]]
+
+        today_ma5 = compute_ma(closes, 5)[-1]
+        today_ma20 = compute_ma(closes, 20)[-1]
+        today_k, today_d = compute_kd(highs, lows, closes)
+        today_k, today_d = today_k[-1], today_d[-1]
+
+        hits = []
+
+        if all(v is not None for v in [today_ma5, today_ma20, prev.get("ma5"), prev.get("ma20")]):
+            if prev["ma5"] <= prev["ma20"] and today_ma5 > today_ma20:
+                hits.append("MA黃金交叉（盤中暫定，買進參考）")
+            elif prev["ma5"] >= prev["ma20"] and today_ma5 < today_ma20:
+                hits.append("MA死亡交叉（盤中暫定，賣出參考）")
+
+        if all(v is not None for v in [today_k, today_d, prev.get("k"), prev.get("d")]):
+            if prev["k"] <= prev["d"] and today_k > today_d:
+                hits.append("KD黃金交叉（盤中暫定，買進參考）")
+            elif prev["k"] >= prev["d"] and today_k < today_d:
+                hits.append("KD死亡交叉（盤中暫定，賣出參考）")
+
+        prior = series[-breakout_window:]
+        if len(prior) >= 5:
+            recent_high = max(h["high"] for h in prior)
+            recent_low = min(h["low"] for h in prior)
+            if q["price"] > recent_high:
+                hits.append(f"突破近{breakout_window}日壓力（盤中暫定，偏多參考）")
+            elif q["price"] < recent_low:
+                hits.append(f"跌破近{breakout_window}日支撐（盤中暫定，偏空參考）")
+
+        if hits:
+            signals[stock_id] = hits
+
+    return signals
+
+
+def intraday_main():
+    """
+    盤中即時更新（另外排程，一天2次：10:00 / 12:00）：
+    - 更新「核心自選股 + 關注股票」的即時價格
+    - 用即時價格 + 歷史資料，偵測盤中「暫定」買賣訊號
+    - 不重新計算價格異常/成交量異常/熱度潛力股（那些需要全市場收盤資料，維持一天一次）
+    - 一樣走 LINE 推播，失敗自動改用 Telegram 備援
+    """
+    os.makedirs(DATA_DIR, exist_ok=True)
+    extra_watchlist = load_extra_watchlist()
+    watch_ids = list(dict.fromkeys(CORE_WATCHLIST + extra_watchlist))
+
+    quotes = fetch_realtime_quotes(watch_ids)
+    if not quotes:
+        print("盤中即時報價抓取失敗或無資料，略過本次更新")
+        return
+
+    history_path = os.path.join(DATA_DIR, HISTORY_FILE_NAME)
+    history = {}
+    if os.path.exists(history_path):
+        with open(history_path, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    intraday_signals = detect_intraday_signals(quotes, history, watch_ids)
+
+    now = datetime.now().strftime("%H:%M")
+    lines = [f"⏱ 盤中即時報價 {now}", ""]
+    for code in watch_ids:
+        q = quotes.get(code)
+        if not q:
+            continue
+        line = f"{code} {q['name']}：{q['price']}（{q['chg_pct']}%）"
+        if intraday_signals.get(code):
+            line += "\n　　⚡ " + "、".join(intraday_signals[code])
+        lines.append(line)
+    lines.append("")
+    lines.append("※ 盤中訊號為暫定值，以收盤後正式結果為準，僅供參考，不構成投資建議")
+    message = "\n".join(lines)
+    print(message)
+
+    sent = send_line_message(message)
+    if not sent:
+        send_telegram_message(message)
+
+    # 更新 latest.csv 裡「核心自選股」部分的價格，動態分類(價格異常等)維持前一次收盤後的資料不變
+    latest_path = os.path.join(DATA_DIR, "latest.csv")
+    if os.path.exists(latest_path):
+        df = pd.read_csv(latest_path)
+    else:
+        df = pd.DataFrame(columns=["證券代號", "證券名稱", "收盤價", "漲跌幅%", "成交股數", "類別"])
+
+    for code in watch_ids:
+        q = quotes.get(code)
+        if not q:
+            continue
+        mask = (df["證券代號"].astype(str) == code) & (df["類別"] == "核心自選股")
+        if mask.any():
+            df.loc[mask, "收盤價"] = q["price"]
+            df.loc[mask, "漲跌幅%"] = q["chg_pct"]
+        else:
+            new_row = pd.DataFrame([{
+                "證券代號": code, "證券名稱": q["name"], "收盤價": q["price"],
+                "漲跌幅%": q["chg_pct"], "成交股數": "", "類別": "核心自選股",
+            }])
+            df = pd.concat([df, new_row], ignore_index=True)
+
+    df.to_csv(latest_path, index=False, encoding="utf-8-sig")
+
+    # 盤中訊號也存一份給網頁用，跟收盤後的signals.json分開，避免互相覆蓋
+    with open(os.path.join(DATA_DIR, "intraday_signals.json"), "w", encoding="utf-8") as f:
+        json.dump(intraday_signals, f, ensure_ascii=False)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "intraday":
+        intraday_main()
+    else:
+        main()
