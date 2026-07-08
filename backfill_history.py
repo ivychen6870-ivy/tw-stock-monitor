@@ -20,7 +20,8 @@ from datetime import datetime, timedelta
 
 from monitor import (
     CORE_WATCHLIST, DATA_DIR, HISTORY_FILE_NAME, HISTORY_MAX_DAYS,
-    compute_ma, compute_kd, fetch_dividend_events, adjust_series_for_dividends,
+    compute_ma, compute_kd, compute_macd, compute_rsi,
+    fetch_dividend_events, adjust_series_for_dividends,
 )
 
 # 要回補幾個月的資料（6個月大約可以讓 MA20、KD、支撐壓力這些指標都有足夠資料可算）
@@ -118,11 +119,16 @@ def main():
         ma5 = compute_ma(closes, 5)
         ma20 = compute_ma(closes, 20)
         k_vals, d_vals = compute_kd(highs, lows, closes)
+        dif_vals, dea_vals = compute_macd(closes)
+        rsi_vals = compute_rsi(closes)
         for i, r in enumerate(rows):
             r["ma5"] = ma5[i]
             r["ma20"] = ma20[i]
             r["k"] = k_vals[i]
             r["d"] = d_vals[i]
+            r["dif"] = dif_vals[i]
+            r["dea"] = dea_vals[i]
+            r["rsi"] = rsi_vals[i]
 
         history[stock_id] = rows
         print(f"  完成，共 {len(rows)} 筆")
@@ -135,4 +141,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
