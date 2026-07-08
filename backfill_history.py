@@ -118,12 +118,14 @@ def main():
         lows = [r["low"] for r in rows]
         ma5 = compute_ma(closes, 5)
         ma20 = compute_ma(closes, 20)
+        ma60 = compute_ma(closes, 60)
         k_vals, d_vals = compute_kd(highs, lows, closes)
         dif_vals, dea_vals = compute_macd(closes)
         rsi_vals = compute_rsi(closes)
         for i, r in enumerate(rows):
             r["ma5"] = ma5[i]
             r["ma20"] = ma20[i]
+            r["ma60"] = ma60[i]
             r["k"] = k_vals[i]
             r["d"] = d_vals[i]
             r["dif"] = dif_vals[i]
@@ -141,4 +143,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
