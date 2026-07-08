@@ -737,12 +737,14 @@ def update_price_history(market_df: pd.DataFrame, watch_ids: list) -> dict:
         lows = [h["low"] for h in series]
         ma5 = compute_ma(closes, 5)
         ma20 = compute_ma(closes, 20)
+        ma60 = compute_ma(closes, 60)  # 較長期均線，用來判斷目前是多頭環境還是空頭環境（趨勢過濾用）
         k_vals, d_vals = compute_kd(highs, lows, closes)
         dif_vals, dea_vals = compute_macd(closes)
         rsi_vals = compute_rsi(closes)
         for i, h in enumerate(series):
             h["ma5"] = ma5[i]
             h["ma20"] = ma20[i]
+            h["ma60"] = ma60[i]
             h["k"] = k_vals[i]
             h["d"] = d_vals[i]
             h["dif"] = dif_vals[i]
@@ -893,7 +895,7 @@ def detect_chart_patterns(series: list, lookback: int = 40, tolerance: float = 0
     return hits
 
 
-def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int = 20) -> dict:
+def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int = 20):
     """
     針對監控股票，比對「今天 vs 昨天」的技術指標狀態，偵測以下訊號：
     - 均線交叉：MA5 穿越 MA20（黃金交叉＝買進參考／死亡交叉＝賣出參考）
@@ -905,11 +907,18 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
     每個訊號都會加註是否有「放量確認」：業界常見標準是當日成交量達到
     近5日均量的1.5倍以上，視為放量，訊號可信度較高；沒放量則標示「量能未明顯放大」。
 
-    回傳 { 股票代號: [訊號文字, ...] }，僅供參考，不構成投資建議。
+    同時用 MA60（季線）判斷「趨勢過濾」：收盤價站上MA60視為多頭環境，跌破視為空頭環境。
+    這裡只負責算出趨勢是多是空，實際「逆勢訊號不計入建議分數」的邏輯放在 build_direction_suggestion，
+    這裡的訊號清單本身不會因為順逆勢而被過濾掉——逆勢訊號一樣完整顯示，只是計分時不採計。
+
+    回傳 (signals, trend_by_code)：
+    - signals：{ 股票代號: [訊號文字, ...] }，僅供參考，不構成投資建議
+    - trend_by_code：{ 股票代號: "多" 或 "空" }，資料不足（不到60天）時該股票不會出現在裡面
     """
     VOLUME_CONFIRM_MULTIPLIER = 1.5
 
     signals = {}
+    trend_by_code = {}
     for stock_id in watch_ids:
         series = history.get(stock_id, [])
         if len(series) < 2:
@@ -917,6 +926,9 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
 
         today, yesterday = series[-1], series[-2]
         hits = []
+
+        if today.get("ma60") is not None:
+            trend_by_code[stock_id] = "多" if today["close"] >= today["ma60"] else "空"
 
         # 成交量確認：今日量 vs 前5日均量（不含今天）
         volume_note = ""
@@ -976,7 +988,7 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
         if hits:
             signals[stock_id] = hits
 
-    return signals
+    return signals, trend_by_code
 
 
 def compute_simple_signals(market_df: pd.DataFrame, stock_ids: list):
@@ -1022,30 +1034,56 @@ def classify_signal_direction(text: str):
     return None
 
 
-def build_direction_suggestion(signals: list):
+def build_direction_suggestion(signals: list, trend=None):
     """
     把同一檔股票當天所有技術訊號的方向加總，變成一個簡單的「建議」標籤。
     這是「規則式計分」（多方訊號數 vs 空方訊號數），不是AI生成的分析，
     多空訊號同時出現時如實呈現「訊號不一致」，不會硬湊出一個方向。
     沒有任何方向性訊號時回傳 None，不會顯示建議。
+
+    trend（"多"或"空"，來自MA60趨勢判斷）：如果有提供，「逆勢」訊號不會被計入分數
+    （例如目前站上MA60的多頭環境下出現的偏空訊號，計分時會被排除），
+    但訊號本身仍完整顯示在⚡清單裡，不會被隱藏——只是不會拿來當作建議依據。
+    這是為了避免盤整格局裡逆勢的雜訊訊號誤導整體建議方向。
     ※ 僅供參考，不構成投資建議
     """
-    bull = sum(1 for s in signals if classify_signal_direction(s) == "多")
-    bear = sum(1 for s in signals if classify_signal_direction(s) == "空")
+    bull = 0
+    bear = 0
+    excluded = 0
+    for s in signals:
+        d = classify_signal_direction(s)
+        if d is None:
+            continue
+        if trend and d != trend:
+            excluded += 1
+            continue
+        if d == "多":
+            bull += 1
+        else:
+            bear += 1
+
     if bull == 0 and bear == 0:
         return None
+
+    trend_note = ""
+    if trend:
+        trend_label = "多頭環境（站上MA60）" if trend == "多" else "空頭環境（跌破MA60）"
+        trend_note = f"，目前{trend_label}"
+        if excluded:
+            trend_note += f"，{excluded}項逆勢訊號未計入"
+
     if bull > bear:
-        return f"📈 建議偏多（{bull}項多方訊號 vs {bear}項空方訊號）"
+        return f"📈 建議偏多（{bull}項多方訊號 vs {bear}項空方訊號{trend_note}）"
     elif bear > bull:
-        return f"📉 建議偏空（{bear}項空方訊號 vs {bull}項多方訊號）"
+        return f"📉 建議偏空（{bear}項空方訊號 vs {bull}項多方訊號{trend_note}）"
     else:
-        return f"⚖️ 訊號不一致（多空各{bull}項），建議觀望"
+        return f"⚖️ 訊號不一致（多空各{bull}項），建議觀望{trend_note}"
 
 
 DIVIDER = "━━━━━━━━━━━━━━"
 
 
-def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=None):
+def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=None, trend_by_code=None):
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [f"📊 台股每日監控　{today}", DIVIDER]
 
@@ -1060,7 +1098,8 @@ def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=
             full_signals = buy_sell_signals[code]
             short_labels = [shorten_signal_label(sig) for sig in full_signals]
             line += "\n　　⚡ " + "、".join(short_labels)
-            suggestion = build_direction_suggestion(full_signals)
+            trend = (trend_by_code or {}).get(code)
+            suggestion = build_direction_suggestion(full_signals, trend)
             if suggestion:
                 line += f"\n　　{suggestion}"
         lines.append(line)
@@ -1179,12 +1218,12 @@ def main():
     all_dynamic_ids = [sid for ids in dynamic_watchlist.values() for sid in ids]
     history_ids = list(dict.fromkeys(watch_ids + all_dynamic_ids))
     history = update_price_history(market_df, history_ids)
-    buy_sell_signals = detect_buy_sell_signals(history, watch_ids)
+    buy_sell_signals, trend_by_code = detect_buy_sell_signals(history, watch_ids)
     with open(os.path.join(DATA_DIR, "signals.json"), "w", encoding="utf-8") as f:
         json.dump(buy_sell_signals, f, ensure_ascii=False)
 
     # 6.4 推播（核心自選股 + 使用者額外關注的股票，都會被推播提醒，含買賣訊號）
-    message = format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals)
+    message = format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals, trend_by_code)
     print(message)
     push_message(message)
 
