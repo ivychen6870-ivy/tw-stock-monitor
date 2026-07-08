@@ -418,6 +418,64 @@
   .news-item .news-title{margin:0;font-size:14px;color:var(--text);line-height:1.5;}
   .news-item .news-meta{margin:4px 0 0;font-family:var(--mono);font-size:11px;color:var(--muted);}
 
+  /* ===================== 投資論點追蹤 ===================== */
+  .thesis-panel{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(280px,1fr));
+    gap:14px;
+    margin-bottom:48px;
+  }
+  .thesis-card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:16px;
+    box-shadow:0 1px 2px rgba(20,20,10,0.04);
+  }
+  .thesis-card.alert{border-color:var(--up);}
+  .thesis-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:8px;
+  }
+  .thesis-code{
+    font-family:var(--mono);
+    font-size:14px;
+    font-weight:700;
+    color:var(--text);
+  }
+  .thesis-badge{
+    font-family:var(--mono);
+    font-size:11px;
+    padding:2px 8px;
+    border-radius:5px;
+  }
+  .thesis-badge.ok{color:var(--down);background:#E9F6EE;}
+  .thesis-badge.alert{color:var(--up);background:#FDEDED;}
+  .thesis-metric{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--text);
+    margin:0 0 8px;
+  }
+  .thesis-note{
+    font-size:12px;
+    color:var(--muted);
+    margin:0;
+    line-height:1.5;
+  }
+  .thesis-empty{
+    background:var(--panel-2);
+    border:1px dashed var(--line);
+    border-radius:10px;
+    padding:24px;
+    text-align:center;
+    color:var(--muted);
+    font-size:13px;
+    margin-bottom:48px;
+  }
+
   /* ===================== 關注股票管理 ===================== */
   .watch-panel{
     background:var(--panel);
@@ -664,6 +722,11 @@
     </section>
 
     <section>
+      <p class="section-label">投資論點追蹤（規則式比對，非AI生成分析）</p>
+      <div class="thesis-panel" id="thesisPanel"></div>
+    </section>
+
+    <section>
       <p class="section-label">關注股票管理</p>
       <div class="watch-panel">
         <p class="watch-desc">
@@ -746,6 +809,11 @@ const DEMO_NEWS = [
 
 const DEMO_WATCHLIST = { core:["2330","2317","2454","0050"], extra:[] };
 
+const DEMO_THESIS = [
+  { "代號":"2330", "門檻%":20, "實際年增%":26.5, "狀態":"符合預期（實際年增26.5% ≥ 門檻20%）", "備註":"看好AI晶片需求持續帶動先進製程營收成長" },
+  { "代號":"3481", "門檻%":0, "實際年增%":-3.2, "狀態":"低於預期（實際年增-3.2% < 門檻0%），建議重新檢視論點", "備註":"面板產業止跌回升，觀察營收是否轉正" },
+];
+
 // 每次頁面載入時產生一個固定的快取破壞參數，讓所有資料檔案的網址都變成「全新的」，
 // 這樣瀏覽器或 GitHub Pages 的 CDN 都不會用到舊版快取，一定會抓最新的檔案內容。
 const CACHE_BUSTER = Date.now();
@@ -799,6 +867,16 @@ async function loadNews(){
     return rows.map(r => ({ code:r["代號"], name:r["名稱"], subject:r["主旨"], date:r["日期"], time:r["時間"] }));
   }catch(e){
     return DEMO_NEWS;
+  }
+}
+
+async function loadThesisTracking(){
+  try{
+    const res = await fetch(withCacheBuster("data/thesis_tracking.json"), { cache:"no-store" });
+    if(!res.ok) throw new Error("no file");
+    return await res.json();
+  }catch(e){
+    return DEMO_THESIS;
   }
 }
 
@@ -998,6 +1076,28 @@ function renderNews(newsRows){
   `).join("");
 }
 
+function renderThesis(thesisRows){
+  const panel = document.getElementById("thesisPanel");
+  if(!thesisRows || thesisRows.length === 0){
+    panel.innerHTML = `<div class="thesis-empty">目前還沒有設定任何投資論點。可以在 monitor.py 的 INVESTMENT_THESIS 裡新增股票代號、營收年增門檻、論點備註，系統就會自動比對。</div>`;
+    return;
+  }
+  panel.innerHTML = thesisRows.map(t => {
+    const isAlert = (t["狀態"] || "").includes("低於預期");
+    const yoy = t["實際年增%"];
+    const yoyText = (yoy === null || yoy === undefined) ? "—" : `${yoy}%`;
+    return `
+      <div class="thesis-card ${isAlert ? 'alert' : 'ok'}">
+        <div class="thesis-head">
+          <span class="thesis-code">${t["代號"]}</span>
+          <span class="thesis-badge ${isAlert ? 'alert' : 'ok'}">${isAlert ? '⚠ 需檢視' : '✓ 符合預期'}</span>
+        </div>
+        <p class="thesis-metric">實際年增 <strong>${yoyText}</strong>　門檻 ${t["門檻%"]}%</p>
+        <p class="thesis-note">${t["備註"] || ""}</p>
+      </div>`;
+  }).join("");
+}
+
 let chart, candleSeries, ma5Series, ma20Series;
 
 function initChart(){
@@ -1089,8 +1189,8 @@ function setupWatchForm(watchlist){
 }
 
 (async function init(){
-  const [rows, history, news, watchlist, dailySignals, intradaySignals] = await Promise.all([
-    loadStockData(), loadHistory(), loadNews(), loadWatchlist(), loadSignals(), loadIntradaySignals(),
+  const [rows, history, news, watchlist, dailySignals, intradaySignals, thesis] = await Promise.all([
+    loadStockData(), loadHistory(), loadNews(), loadWatchlist(), loadSignals(), loadIntradaySignals(), loadThesisTracking(),
   ]);
   const signals = mergeSignals(dailySignals, intradaySignals);
   document.getElementById("dataDate").textContent = new Date().toLocaleDateString("zh-TW");
@@ -1098,6 +1198,7 @@ function setupWatchForm(watchlist){
   renderCore(rows, history, signals);
   renderDynamic(rows, history, signals);
   renderNews(news);
+  renderThesis(thesis);
   setupChartSection(rows, history);
   setupWatchForm(watchlist);
 })();
