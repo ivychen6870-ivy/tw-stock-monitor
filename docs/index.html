@@ -176,6 +176,62 @@
     color:var(--muted);
   }
   .dynamic-category{margin-bottom:32px;}
+
+  /* ===================== 動態清單排行榜表格 ===================== */
+  .ranking-table-wrap{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    overflow-x:auto;
+    box-shadow:0 1px 2px rgba(20,20,10,0.04);
+  }
+  .ranking-table{
+    width:100%;
+    border-collapse:collapse;
+    font-family:var(--mono);
+    font-size:13px;
+    white-space:nowrap;
+  }
+  .ranking-table th{
+    text-align:left;
+    padding:12px 14px;
+    font-size:11px;
+    color:var(--muted);
+    letter-spacing:1px;
+    text-transform:uppercase;
+    border-bottom:1px solid var(--line);
+    background:var(--panel-2);
+  }
+  .ranking-table td{
+    padding:12px 14px;
+    border-bottom:1px solid var(--line);
+    color:var(--text);
+  }
+  .ranking-table tr:last-child td{border-bottom:none;}
+  .ranking-table .rank-cell{
+    font-family:var(--display);
+    font-weight:700;
+    color:var(--amber);
+    text-align:center;
+  }
+  .ranking-table .name-cell{font-family:var(--display);}
+  .ranking-table .name-main{font-size:13px;color:var(--text);}
+  .ranking-table .code-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+  .ranking-table .price-box{
+    display:inline-block;
+    padding:4px 10px;
+    border-radius:6px;
+    font-weight:700;
+    color:#FFFFFF;
+    min-width:60px;
+    text-align:center;
+  }
+  .ranking-table .price-box.up{background:var(--up);}
+  .ranking-table .price-box.down{background:var(--down);}
+  .ranking-table .up-text{color:var(--up);font-weight:600;}
+  .ranking-table .down-text{color:var(--down);font-weight:600;}
+
+
   .dynamic-category:last-child{margin-bottom:0;}
   .dynamic-sub-label{margin-bottom:12px !important;}
   .signal-badges{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;}
@@ -651,14 +707,14 @@ const GITHUB_REPO = "ivychen6870-ivy/tw-stock-monitor";
 */
 
 const DEMO_DATA = [
-  { code:"2330", name:"台積電", price:1015, chg:1.2, chgAmount:12, volume:18590000, category:"核心自選股" },
-  { code:"2317", name:"鴻海",   price:186,  chg:-0.8, chgAmount:-1.5, volume:9200000, category:"核心自選股" },
-  { code:"2454", name:"聯發科", price:1320, chg:2.1, chgAmount:27, volume:4300000, category:"核心自選股" },
-  { code:"0050", name:"元大台灣50", price:198, chg:0.3, chgAmount:0.6, volume:6100000, category:"核心自選股" },
-  { code:"3231", name:"緯創",   price:215,  chg:6.4, chgAmount:12.9, volume:32000000, category:"價格異常" },
-  { code:"2603", name:"長榮",   price:198,  chg:-5.3, chgAmount:-11.1, volume:28000000, category:"價格異常" },
-  { code:"6488", name:"環球晶", price:512,  chg:3.9, chgAmount:19.2, volume:5200000, category:"成交量異常" },
-  { code:"2382", name:"廣達",   price:298,  chg:1.1, chgAmount:3.2, volume:15000000, category:"熱度潛力股" },
+  { code:"2330", name:"台積電", price:1015, chg:1.2, chgAmount:12, high:1020, low:1000, volume:18590000, turnover:1885000000, category:"核心自選股" },
+  { code:"2317", name:"鴻海",   price:186,  chg:-0.8, chgAmount:-1.5, high:190, low:185, volume:9200000, turnover:171000000, category:"核心自選股" },
+  { code:"2454", name:"聯發科", price:1320, chg:2.1, chgAmount:27, high:1330, low:1290, volume:4300000, turnover:566000000, category:"核心自選股" },
+  { code:"0050", name:"元大台灣50", price:198, chg:0.3, chgAmount:0.6, high:199, low:197, volume:6100000, turnover:120000000, category:"核心自選股" },
+  { code:"3231", name:"緯創",   price:215,  chg:6.4, chgAmount:12.9, high:218, low:202, volume:32000000, turnover:687000000, category:"價格異常" },
+  { code:"2603", name:"長榮",   price:198,  chg:-5.3, chgAmount:-11.1, high:209, low:197, volume:28000000, turnover:562000000, category:"價格異常" },
+  { code:"6488", name:"環球晶", price:512,  chg:3.9, chgAmount:19.2, high:515, low:495, volume:5200000, turnover:266000000, category:"成交量異常" },
+  { code:"2382", name:"廣達",   price:298,  chg:1.1, chgAmount:3.2, high:300, low:293, volume:15000000, turnover:446000000, category:"熱度潛力股" },
 ];
 
 function buildDemoHistory(base){
@@ -712,7 +768,10 @@ async function loadStockData(){
       code: r["證券代號"], name: r["證券名稱"],
       price: parseFloat(r["收盤價"]), chg: parseFloat(r["漲跌幅%"]),
       chgAmount: parseFloat(r["漲跌金額"]) || 0,
+      high: parseFloat(r["最高價"]) || 0,
+      low: parseFloat(r["最低價"]) || 0,
       volume: parseInt(r["成交股數"], 10) || 0,
+      turnover: parseFloat(r["成交金額"]) || 0,
       category: r["類別"] || "動態觀察",
     }));
   }catch(e){
@@ -862,6 +921,47 @@ function renderCore(rows, history, signals){
   grid.innerHTML = core.map(r => buildStockCardHtml(r, history, signals)).join("");
 }
 
+function formatTurnover(amount){
+  if(!amount) return "—";
+  return (amount / 100000000).toFixed(4);
+}
+
+function buildRankingTableHtml(items){
+  const rowsHtml = items.map((r, i) => {
+    const dir = r.chg >= 0 ? "up" : "down";
+    const arrow = r.chg > 0 ? "▲" : (r.chg < 0 ? "▼" : "");
+    const sign = r.chg >= 0 ? "+" : "";
+    const spread = (r.high && r.low) ? (r.high - r.low).toFixed(2) : "—";
+    return `
+      <tr>
+        <td class="rank-cell">${i + 1}</td>
+        <td class="name-cell">
+          <div class="name-main">${r.name}</div>
+          <div class="code-sub">${r.code}.TW</div>
+        </td>
+        <td class="price-cell"><span class="price-box ${dir}">${r.price}</span></td>
+        <td class="${dir}-text">${arrow} ${sign}${r.chgAmount.toFixed(2)}</td>
+        <td class="${dir}-text">${arrow} ${sign}${r.chg.toFixed(2)}%</td>
+        <td>${r.high || "—"}</td>
+        <td>${r.low || "—"}</td>
+        <td>${spread}</td>
+        <td>${formatVolume(r.volume)}</td>
+        <td>${formatTurnover(r.turnover)}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <table class="ranking-table">
+      <thead>
+        <tr>
+          <th>名次</th><th>股名/股號</th><th>股價</th><th>漲跌</th><th>漲跌幅(%)</th>
+          <th>最高</th><th>最低</th><th>價差</th><th>成交量(張)</th><th>成交金額(億)</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>`;
+}
+
 function renderDynamic(rows, history, signals){
   const container = document.getElementById("dynamicGrid");
   const categories = {};
@@ -872,11 +972,11 @@ function renderDynamic(rows, history, signals){
   });
 
   container.innerHTML = Object.entries(categories).map(([cat, items]) => {
-    const cardsHtml = items.map(r => buildStockCardHtml(r, history, signals)).join("");
+    const tableHtml = buildRankingTableHtml(items);
     return `
       <div class="dynamic-category">
-        <p class="section-label dynamic-sub-label">${cat}（命中 ${items.length} 檔）</p>
-        <div class="dynamic-card-grid">${cardsHtml}</div>
+        <p class="section-label dynamic-sub-label">${cat}排行（命中 ${items.length} 檔）</p>
+        <div class="ranking-table-wrap">${tableHtml}</div>
       </div>`;
   }).join("");
 }
