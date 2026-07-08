@@ -40,6 +40,21 @@ CORE_WATCHLIST = [
 # 推播訊息裡，每個動態分類最多顯示幾檔（避免訊息太長），網頁則會顯示完整的 DYNAMIC_LIMIT_PER_CATEGORY 檔數
 PUSH_MESSAGE_TOP_N = 5
 
+# ============================================================
+# 投資論點維護（/thesis 簡化版）—— 規則式比對，不是AI生成文字
+# ============================================================
+# 在這裡記錄你對特定股票的投資假設，系統會拿最新月營收年增率跟你設定的門檻比對，
+# 幫你自動盯著「數字有沒有偏離原本的假設」，不用自己每個月手動去查。
+#
+# 格式：股票代號: {"revenue_yoy_min": 門檻百分比, "note": 你的論點簡述}
+# revenue_yoy_min 代表「你預期這檔股票的月營收年增率至少要達到多少%」，
+# 實際年增率低於這個門檻，系統就會標記「低於預期，建議重新檢視論點」。
+INVESTMENT_THESIS = {
+    "2330": {"revenue_yoy_min": 20, "note": "看好AI晶片需求持續帶動先進製程營收成長"},
+    "3481": {"revenue_yoy_min": 0, "note": "面板產業止跌回升，觀察營收是否轉正"},
+    "3324": {"revenue_yoy_min": 10, "note": "AI伺服器散熱需求，預期營收維持雙位數成長"},
+}
+
 # 動態層每個類別最多納入幾檔，避免推播爆量
 DYNAMIC_LIMIT_PER_CATEGORY = 10
 
@@ -130,6 +145,87 @@ def fetch_material_announcements(limit: int = 15):
         "時間": df[time_col] if time_col else "",
     })
     return out.head(limit)
+
+
+def fetch_monthly_revenue(stock_ids: list) -> dict:
+    """
+    抓取上市公司月營收（免費，證交所 OpenAPI，端點 t187ap05_L），
+    回傳 { 股票代號: 年增率% }，只保留 stock_ids 裡有的股票。
+
+    這個端點沒有正式的欄位文件，用「欄位名稱關鍵字比對」盡量抓對，
+    如果格式跟預期不同，對應股票的年增率會回傳 None，不會讓程式掛掉。
+    """
+    url = "https://openapi.twse.com.tw/v1/opendata/t187ap05_L"
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        df = pd.DataFrame(resp.json())
+    except Exception as e:
+        print(f"抓取月營收失敗：{e}")
+        return {}
+
+    if df.empty:
+        return {}
+
+    def find_col(*keywords):
+        for c in df.columns:
+            if all(k in c for k in keywords):
+                return c
+        return None
+
+    code_col = find_col("公司代號")
+    yoy_col = find_col("去年同月增減")  # 證交所通常會直接算好年增率百分比
+    cur_rev_col = find_col("當月營收") or find_col("營業收入", "當月")
+    last_year_rev_col = find_col("去年當月營收") or find_col("去年", "當月", "營收")
+
+    result = {}
+    for _, row in df.iterrows():
+        if code_col is None:
+            break
+        code = str(row[code_col]).strip()
+        if code not in stock_ids:
+            continue
+        yoy = None
+        try:
+            if yoy_col is not None:
+                raw = str(row[yoy_col]).replace(",", "").replace("%", "").strip()
+                if raw not in ("", "-", "nan"):
+                    yoy = round(float(raw), 2)
+            elif cur_rev_col is not None and last_year_rev_col is not None:
+                cur = float(str(row[cur_rev_col]).replace(",", ""))
+                last = float(str(row[last_year_rev_col]).replace(",", ""))
+                if last:
+                    yoy = round((cur - last) / last * 100, 2)
+        except (ValueError, TypeError):
+            yoy = None
+        result[code] = yoy
+
+    return result
+
+
+def check_investment_thesis(monthly_revenue: dict) -> list:
+    """
+    比對 INVESTMENT_THESIS 裡設定的假設 vs 實際月營收年增率，
+    回傳每檔股票的比對結果，供推播訊息跟網頁顯示。
+    這是規則式比對（數字 vs 門檻），不是AI生成的分析文字。
+    """
+    results = []
+    for code, thesis in INVESTMENT_THESIS.items():
+        yoy = monthly_revenue.get(code)
+        threshold = thesis.get("revenue_yoy_min", 0)
+        note = thesis.get("note", "")
+
+        if yoy is None:
+            status = "本月營收資料尚未公布或抓取失敗"
+        elif yoy >= threshold:
+            status = f"符合預期（實際年增{yoy}% ≥ 門檻{threshold}%）"
+        else:
+            status = f"低於預期（實際年增{yoy}% < 門檻{threshold}%），建議重新檢視論點"
+
+        results.append({
+            "代號": code, "門檻%": threshold, "實際年增%": yoy, "狀態": status, "備註": note,
+        })
+    return results
 
 
 # ============================================================
@@ -806,6 +902,28 @@ def main():
         news_df.to_csv(os.path.join(DATA_DIR, "news.csv"), index=False, encoding="utf-8-sig")
     except Exception as e:
         print(f"抓取重大訊息公告失敗，略過本次新聞更新：{e}")
+
+    # 6.8 投資論點維護（規則式比對，只針對 INVESTMENT_THESIS 裡有設定的股票）
+    if INVESTMENT_THESIS:
+        try:
+            monthly_revenue = fetch_monthly_revenue(list(INVESTMENT_THESIS.keys()))
+            thesis_results = check_investment_thesis(monthly_revenue)
+            with open(os.path.join(DATA_DIR, "thesis_tracking.json"), "w", encoding="utf-8") as f:
+                json.dump(thesis_results, f, ensure_ascii=False)
+
+            # 只有「低於預期」的論點才會額外推播提醒，避免每天都塞一堆正常訊息
+            alerts = [r for r in thesis_results if "低於預期" in r["狀態"]]
+            if alerts:
+                lines = ["📌 投資論點提醒：以下持股可能需要重新檢視", ""]
+                for r in alerts:
+                    lines.append(f"{r['代號']}：{r['狀態']}")
+                    if r["備註"]:
+                        lines.append(f"　　原始論點：{r['備註']}")
+                lines.append("")
+                lines.append("※ 此為規則式比對，非AI生成分析，僅供參考，不構成投資建議")
+                push_message("\n".join(lines))
+        except Exception as e:
+            print(f"投資論點比對失敗，略過本次更新：{e}")
 
 
 def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
