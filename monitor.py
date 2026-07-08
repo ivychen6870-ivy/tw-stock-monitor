@@ -810,21 +810,25 @@ def main():
 
 def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
     """
-    產生 docs/data/latest.csv，欄位固定為：證券代號,證券名稱,收盤價,漲跌幅%,漲跌金額,成交股數,類別
+    產生 docs/data/latest.csv，欄位固定為：
+    證券代號,證券名稱,收盤價,漲跌幅%,漲跌金額,最高價,最低價,成交股數,成交金額,類別
     """
     rows = []
     lookup = market_df.set_index(market_df["證券代號"].astype(str))
 
     for s in core_signals:
         code = str(s["代號"])
-        volume = lookup.loc[code].get("成交股數", "") if code in lookup.index else ""
+        market_row = lookup.loc[code] if code in lookup.index else {}
         rows.append({
             "證券代號": s["代號"],
             "證券名稱": s["名稱"],
             "收盤價": s["收盤價"],
             "漲跌幅%": s["漲跌幅%"],
             "漲跌金額": s.get("漲跌金額", 0),
-            "成交股數": volume,
+            "最高價": market_row.get("最高價", "") if len(market_row) else "",
+            "最低價": market_row.get("最低價", "") if len(market_row) else "",
+            "成交股數": market_row.get("成交股數", "") if len(market_row) else "",
+            "成交金額": market_row.get("成交金額", "") if len(market_row) else "",
             "類別": "核心自選股",
         })
 
@@ -842,7 +846,10 @@ def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
                 "收盤價": row.get("收盤價", ""),
                 "漲跌幅%": round(row.get("漲跌幅%", 0), 2),
                 "漲跌金額": round(row.get("漲跌價差", 0), 2),
+                "最高價": row.get("最高價", ""),
+                "最低價": row.get("最低價", ""),
                 "成交股數": row.get("成交股數", ""),
+                "成交金額": row.get("成交金額", ""),
                 "類別": category,
             })
 
