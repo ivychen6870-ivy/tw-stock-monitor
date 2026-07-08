@@ -55,6 +55,16 @@ INVESTMENT_THESIS = {
     "3324": {"revenue_yoy_min": 10, "note": "AI伺服器散熱需求，預期營收維持雙位數成長"},
 }
 
+# ============================================================
+# 催化事件追蹤（/catalysts 簡化版）—— 法說會／股東會日期
+# 全部使用證交所免費 OpenAPI，不需要金鑰，不會產生額外費用
+# ============================================================
+# 追蹤股票清單，預設沿用核心自選股，也可以改成只列你關心的代號
+CATALYST_WATCHLIST = CORE_WATCHLIST
+
+# LINE推播只在事件倒數幾天內才提醒（避免太早知道就一直被打擾），網頁則會顯示所有未來事件
+CATALYST_ALERT_DAYS_AHEAD = 7
+
 # 動態層每個類別最多納入幾檔，避免推播爆量
 DYNAMIC_LIMIT_PER_CATEGORY = 10
 
@@ -226,6 +236,124 @@ def check_investment_thesis(monthly_revenue: dict) -> list:
             "代號": code, "門檻%": threshold, "實際年增%": yoy, "狀態": status, "備註": note,
         })
     return results
+
+
+def _roc_date_to_display(raw: str):
+    """民國日期字串（如"1150620"）轉成好讀格式"115/06/20"，格式不對就照原樣回傳"""
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    if len(digits) >= 7:
+        return f"{digits[:3]}/{digits[3:5]}/{digits[5:7]}"
+    return raw
+
+
+def fetch_shareholder_meeting_dates(stock_ids: list) -> dict:
+    """
+    股東會日期 —— 證交所「股利分派情形」OpenAPI（t187ap45_L），免費、不需金鑰。
+    這份資料原本是揭露股利分派用的，但股東會日期是同一次公告出來的，
+    是目前唯一「結構化欄位、非HTML爬蟲」能拿到股東會日期的免費資料源。
+    回傳 { 股票代號: 股東會日期（民國年月日字串，如"1150620"）}
+    """
+    url = "https://openapi.twse.com.tw/v1/opendata/t187ap45_L"
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        df = pd.DataFrame(resp.json())
+    except Exception as e:
+        print(f"抓取股東會日期失敗：{e}")
+        return {}
+    if df.empty:
+        return {}
+
+    code_col = next((c for c in df.columns if "公司代號" in c), None)
+    date_col = next((c for c in df.columns if "股東會日期" in c), None)
+    if code_col is None or date_col is None:
+        return {}
+
+    result = {}
+    for _, row in df.iterrows():
+        code = str(row[code_col]).strip()
+        if code not in stock_ids:
+            continue
+        raw = str(row[date_col]).strip()
+        if raw and raw not in ("", "nan", "-"):
+            result[code] = raw  # 同代號多筆時，後面覆蓋前面，保留最後一筆
+    return result
+
+
+def extract_date_from_subject(subject: str):
+    """
+    從公告主旨文字裡，用常見民國日期格式（如「115年07月15日」「115/07/15」）盡量解析出日期，
+    抓不到就回傳 None——這是文字解析，不保證100%準確，不會讓程式掛掉。
+    """
+    import re
+    m = re.search(r"(\d{2,3})[年/-](\d{1,2})[月/-](\d{1,2})日?", subject)
+    if m:
+        return f"{m.group(1)}/{m.group(2).zfill(2)}/{m.group(3).zfill(2)}"
+    return None
+
+
+def fetch_investor_conference_events(stock_ids: list, news_df) -> list:
+    """
+    法說會（法人說明會）事件 —— 證交所OpenAPI沒有「未來排定法說會」的結構化端點，
+    只有「本年度累計已召開次數」，所以改比對已經在抓的「重大訊息」公告（t187ap04_L，免費），
+    看主旨裡有沒有「法說會」「法人說明會」字樣。
+
+    重要限制（老實說）：只有公司「有」透過重大訊息公告法說會時程時才抓得到，
+    不是100%涵蓋所有公司；日期是從主旨文字解析，抓不到時「日期」為 None，
+    網頁會顯示「詳見備註」而不是讓程式掛掉。
+    """
+    if news_df is None or news_df.empty:
+        return []
+    events = []
+    for _, row in news_df.iterrows():
+        code = str(row.get("代號", "")).strip()
+        if code not in stock_ids:
+            continue
+        subject = str(row.get("主旨", ""))
+        if ("法說會" in subject) or ("法人說明會" in subject):
+            events.append({
+                "代號": code,
+                "名稱": row.get("名稱", ""),
+                "類型": "法說會",
+                "日期": extract_date_from_subject(subject),
+                "備註": subject[:60],
+            })
+    return events
+
+
+def build_catalyst_events(stock_ids: list, news_df) -> list:
+    """
+    組合股東會日期 + 法說會事件，並濾掉「日期解析得出來、但已經過期」的事件，
+    避免網頁跟推播出現一堆已經開完的舊股東會。
+    日期解析不出來的事件（法說會常見）會保留，因為無法判斷是否過期，讓你自己點進備註確認。
+    """
+    today = datetime.now()
+    events = []
+
+    meeting_dates = fetch_shareholder_meeting_dates(stock_ids)
+    for code, raw_date in meeting_dates.items():
+        events.append({
+            "代號": code, "類型": "股東會",
+            "日期": _roc_date_to_display(raw_date), "備註": "資料來源：股利分派情形公告",
+        })
+
+    events += fetch_investor_conference_events(stock_ids, news_df)
+
+    kept = []
+    for e in events:
+        if not e["日期"]:
+            kept.append(e)  # 解析不出日期，無法判斷過期與否，保留讓你自己看備註
+            continue
+        try:
+            y, m, d = e["日期"].split("/")
+            event_date = datetime(int(y) + 1911, int(m), int(d))
+            if event_date.date() >= today.date():
+                kept.append(e)
+        except Exception:
+            kept.append(e)  # 解析失敗也保留，不要因為格式問題把資料弄丟
+
+    kept.sort(key=lambda e: e["日期"] or "9999/99/99")
+    return kept
 
 
 # ============================================================
@@ -897,6 +1025,8 @@ def main():
     write_dashboard_csv(market_df, core_signals, dynamic_watchlist)
 
     # 6.7 今日新聞（重大訊息公告）
+    # news_df 提到 try 區塊外宣告，是因為 6.9 催化事件追蹤要重複使用這份資料
+    news_df = pd.DataFrame()
     try:
         news_df = fetch_material_announcements()
         news_df.to_csv(os.path.join(DATA_DIR, "news.csv"), index=False, encoding="utf-8-sig")
@@ -924,6 +1054,50 @@ def main():
                 push_message("\n".join(lines))
         except Exception as e:
             print(f"投資論點比對失敗，略過本次更新：{e}")
+
+    # 6.9 催化事件追蹤（股東會日期 + 法說會關鍵字比對，全部免費資料源）
+    try:
+        catalyst_events = build_catalyst_events(CATALYST_WATCHLIST, news_df)
+        with open(os.path.join(DATA_DIR, "catalyst_events.json"), "w", encoding="utf-8") as f:
+            json.dump(catalyst_events, f, ensure_ascii=False)
+
+        # 只推播「還沒推播過」且日期落在提醒天數內的事件，避免每次執行都重複轟炸
+        notified_path = os.path.join(DATA_DIR, "catalyst_notified.json")
+        notified = set()
+        if os.path.exists(notified_path):
+            with open(notified_path, "r", encoding="utf-8") as f:
+                notified = set(json.load(f))
+
+        today = datetime.now()
+        new_alerts = []
+        still_notified = set(notified)
+        for e in catalyst_events:
+            if not e["日期"]:
+                continue
+            key = f"{e['代號']}_{e['類型']}_{e['日期']}"
+            if key in notified:
+                continue
+            try:
+                y, m, d = e["日期"].split("/")
+                days_left = (datetime(int(y) + 1911, int(m), int(d)) - today).days
+            except Exception:
+                continue
+            if 0 <= days_left <= CATALYST_ALERT_DAYS_AHEAD:
+                new_alerts.append((e, days_left))
+                still_notified.add(key)
+
+        if new_alerts:
+            lines = ["📅 催化事件提醒：", ""]
+            for e, days_left in new_alerts:
+                lines.append(f"{e['代號']}　{e['類型']}　{e['日期']}（{days_left}天後）")
+            lines.append("")
+            lines.append("※ 股東會日期來自證交所結構化資料；法說會日期為重大訊息公告關鍵字比對，僅供參考，不構成投資建議")
+            push_message("\n".join(lines))
+
+        with open(notified_path, "w", encoding="utf-8") as f:
+            json.dump(list(still_notified), f, ensure_ascii=False)
+    except Exception as e:
+        print(f"催化事件追蹤失敗，略過本次更新：{e}")
 
 
 def write_dashboard_csv(market_df, core_signals, dynamic_watchlist):
@@ -1155,3 +1329,4 @@ if __name__ == "__main__":
         intraday_main()
     else:
         main()
+
