@@ -213,12 +213,14 @@ def fetch_monthly_revenue(stock_ids: list) -> dict:
     return result
 
 
-def check_investment_thesis(monthly_revenue: dict) -> list:
+def check_investment_thesis(monthly_revenue: dict, name_lookup: dict = None) -> list:
     """
     比對 INVESTMENT_THESIS 裡設定的假設 vs 實際月營收年增率，
     回傳每檔股票的比對結果，供推播訊息跟網頁顯示。
     這是規則式比對（數字 vs 門檻），不是AI生成的分析文字。
+    name_lookup 是 {股票代號: 股票名稱} 的對照表，找不到時名稱留空字串，不會讓程式掛掉。
     """
+    name_lookup = name_lookup or {}
     results = []
     for code, thesis in INVESTMENT_THESIS.items():
         yoy = monthly_revenue.get(code)
@@ -233,7 +235,8 @@ def check_investment_thesis(monthly_revenue: dict) -> list:
             status = f"低於預期（實際年增{yoy}% < 門檻{threshold}%），建議重新檢視論點"
 
         results.append({
-            "代號": code, "門檻%": threshold, "實際年增%": yoy, "狀態": status, "備註": note,
+            "代號": code, "名稱": name_lookup.get(code, ""),
+            "門檻%": threshold, "實際年增%": yoy, "狀態": status, "備註": note,
         })
     return results
 
@@ -321,19 +324,21 @@ def fetch_investor_conference_events(stock_ids: list, news_df) -> list:
     return events
 
 
-def build_catalyst_events(stock_ids: list, news_df) -> list:
+def build_catalyst_events(stock_ids: list, news_df, name_lookup: dict = None) -> list:
     """
     組合股東會日期 + 法說會事件，並濾掉「日期解析得出來、但已經過期」的事件，
     避免網頁跟推播出現一堆已經開完的舊股東會。
     日期解析不出來的事件（法說會常見）會保留，因為無法判斷是否過期，讓你自己點進備註確認。
+    name_lookup 是 {股票代號: 股票名稱} 的對照表，找不到時名稱留空字串。
     """
+    name_lookup = name_lookup or {}
     today = datetime.now()
     events = []
 
     meeting_dates = fetch_shareholder_meeting_dates(stock_ids)
     for code, raw_date in meeting_dates.items():
         events.append({
-            "代號": code, "類型": "股東會",
+            "代號": code, "名稱": name_lookup.get(code, ""), "類型": "股東會",
             "日期": _roc_date_to_display(raw_date), "備註": "資料來源：股利分派情形公告",
         })
 
@@ -900,26 +905,31 @@ def compute_simple_signals(market_df: pd.DataFrame, stock_ids: list):
 # 5. 推播層：訊息合併成一則，優先用 LINE，備援用 Telegram
 # ============================================================
 
+DIVIDER = "━━━━━━━━━━━━━━"
+
+
 def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=None):
     today = datetime.now().strftime("%Y-%m-%d")
-    lines = [f"📊 台股每日監控 {today}", ""]
+    lines = [f"📊 台股每日監控　{today}", DIVIDER]
 
     lines.append("【核心自選股】")
     for s in core_signals:
         code = str(s['代號'])
         chg_amount = s.get('漲跌金額', 0)
         sign = "+" if chg_amount >= 0 else ""
-        line = f"{code} {s['名稱']}：{s['收盤價']}（{sign}{chg_amount} / {s['漲跌幅%']}%）"
+        dot = "🔴" if chg_amount >= 0 else "🟢"  # 跟網頁K線圖同色系：紅漲綠跌
+        line = f"{dot} {code} {s['名稱']}　{s['收盤價']}　{sign}{chg_amount}（{sign}{s['漲跌幅%']}%）"
         if buy_sell_signals and buy_sell_signals.get(code):
             line += "\n　　⚡ " + "、".join(buy_sell_signals[code])
         lines.append(line)
 
     lookup = market_df.set_index(market_df["證券代號"].astype(str))
-    lines.append("")
     for category, ids in dynamic_watchlist.items():
         if not ids:
             continue
         top_ids = ids[:PUSH_MESSAGE_TOP_N]
+        lines.append("")
+        lines.append(DIVIDER)
         lines.append(f"【{category}】命中 {len(ids)} 檔，以下為前{len(top_ids)}：")
         for stock_id in top_ids:
             if stock_id not in lookup.index:
@@ -930,9 +940,11 @@ def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=
             chg = round(row.get("漲跌幅%", 0), 2)
             chg_amount = round(row.get("漲跌價差", 0), 2)
             sign = "+" if chg_amount >= 0 else ""
-            lines.append(f"{stock_id} {name}：{price}（{sign}{chg_amount} / {chg}%）")
-        lines.append("")
+            dot = "🔴" if chg_amount >= 0 else "🟢"
+            lines.append(f"{dot} {stock_id} {name}　{price}　{sign}{chg_amount}（{sign}{chg}%）")
 
+    lines.append("")
+    lines.append(DIVIDER)
     lines.append("※ 以上訊號僅供參考，不構成投資建議")
 
     return "\n".join(lines)
@@ -999,6 +1011,11 @@ def main():
     except Exception:
         inst_df = pd.DataFrame()
 
+    # 股票代號 -> 名稱對照表，供投資論點追蹤、催化事件追蹤等區塊顯示股票名稱用
+    stock_name_lookup = dict(zip(
+        market_df["證券代號"].astype(str), market_df["證券名稱"].astype(str)
+    )) if "證券代號" in market_df.columns and "證券名稱" in market_df.columns else {}
+
     dynamic_watchlist = build_dynamic_watchlist(market_df, inst_df)
     core_signals = compute_simple_signals(market_df, watch_ids)
 
@@ -1037,7 +1054,7 @@ def main():
     if INVESTMENT_THESIS:
         try:
             monthly_revenue = fetch_monthly_revenue(list(INVESTMENT_THESIS.keys()))
-            thesis_results = check_investment_thesis(monthly_revenue)
+            thesis_results = check_investment_thesis(monthly_revenue, stock_name_lookup)
             with open(os.path.join(DATA_DIR, "thesis_tracking.json"), "w", encoding="utf-8") as f:
                 json.dump(thesis_results, f, ensure_ascii=False)
 
@@ -1046,7 +1063,7 @@ def main():
             if alerts:
                 lines = ["📌 投資論點提醒：以下持股可能需要重新檢視", ""]
                 for r in alerts:
-                    lines.append(f"{r['代號']}：{r['狀態']}")
+                    lines.append(f"{r['代號']} {r.get('名稱','')}：{r['狀態']}")
                     if r["備註"]:
                         lines.append(f"　　原始論點：{r['備註']}")
                 lines.append("")
@@ -1057,7 +1074,7 @@ def main():
 
     # 6.9 催化事件追蹤（股東會日期 + 法說會關鍵字比對，全部免費資料源）
     try:
-        catalyst_events = build_catalyst_events(CATALYST_WATCHLIST, news_df)
+        catalyst_events = build_catalyst_events(CATALYST_WATCHLIST, news_df, stock_name_lookup)
         with open(os.path.join(DATA_DIR, "catalyst_events.json"), "w", encoding="utf-8") as f:
             json.dump(catalyst_events, f, ensure_ascii=False)
 
@@ -1087,10 +1104,12 @@ def main():
                 still_notified.add(key)
 
         if new_alerts:
-            lines = ["📅 催化事件提醒：", ""]
+            lines = ["📅 催化事件提醒", DIVIDER]
             for e, days_left in new_alerts:
-                lines.append(f"{e['代號']}　{e['類型']}　{e['日期']}（{days_left}天後）")
+                icon = "📌" if e["類型"] == "股東會" else "🎤"
+                lines.append(f"{icon} {e['代號']} {e.get('名稱','')}　{e['類型']}　{e['日期']}（{days_left}天後）")
             lines.append("")
+            lines.append(DIVIDER)
             lines.append("※ 股東會日期來自證交所結構化資料；法說會日期為重大訊息公告關鍵字比對，僅供參考，不構成投資建議")
             push_message("\n".join(lines))
 
@@ -1329,4 +1348,3 @@ if __name__ == "__main__":
         intraday_main()
     else:
         main()
-
