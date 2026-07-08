@@ -45,5 +45,9 @@ jobs:
           git config user.email "actions@github.com"
           git add docs/data/
           git diff --staged --quiet || git commit -m "更新每日市場資料 $(date +%Y-%m-%d)"
-          git pull --rebase origin main
-          git push
+          git fetch origin main
+          # docs/data 是每次重新產生的快照，遇到衝突時直接以這次跑出來的最新資料為準，
+          # 避免因為重複手動重跑或跟盤中更新撞在一起而卡在 rebase 衝突、導致整個 workflow 失敗
+          git merge -X ours origin/main --no-edit || (git checkout --ours docs/data/ && git add docs/data/ && git commit --no-edit)
+          git push origin HEAD:main
+
