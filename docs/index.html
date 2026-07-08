@@ -727,6 +727,15 @@
     </section>
 
     <section>
+      <p class="section-label">催化事件追蹤（股東會／法說會，僅供參考）</p>
+      <div class="thesis-panel" id="catalystPanel"></div>
+      <p class="signal-disclaimer">
+        股東會日期來自證交所結構化資料，涵蓋率高；法說會日期為重大訊息公告關鍵字比對，
+        只涵蓋「有透過重大訊息預告」的公司，不是完整日曆，日期解析不出來時會顯示「詳見備註」。
+      </p>
+    </section>
+
+    <section>
       <p class="section-label">關注股票管理</p>
       <div class="watch-panel">
         <p class="watch-desc">
@@ -877,6 +886,16 @@ async function loadThesisTracking(){
     return await res.json();
   }catch(e){
     return DEMO_THESIS;
+  }
+}
+
+async function loadCatalystEvents(){
+  try{
+    const res = await fetch(withCacheBuster("data/catalyst_events.json"), { cache:"no-store" });
+    if(!res.ok) throw new Error("no file");
+    return await res.json();
+  }catch(e){
+    return [];
   }
 }
 
@@ -1098,6 +1117,32 @@ function renderThesis(thesisRows){
   }).join("");
 }
 
+function renderCatalysts(rows){
+  const panel = document.getElementById("catalystPanel");
+  if(!rows || rows.length === 0){
+    panel.innerHTML = `<div class="thesis-empty">目前沒有偵測到即將召開的股東會或法說會公告。</div>`;
+    return;
+  }
+  panel.innerHTML = rows.map(e => {
+    let isSoon = false;
+    if(e["日期"]){
+      const parts = e["日期"].split("/").map(Number);
+      const eventDate = new Date(parts[0] + 1911, parts[1] - 1, parts[2]);
+      const daysLeft = Math.ceil((eventDate - new Date()) / 86400000);
+      isSoon = daysLeft <= 7;
+    }
+    return `
+      <div class="thesis-card ${isSoon ? 'alert' : 'ok'}">
+        <div class="thesis-head">
+          <span class="thesis-code">${e["代號"]}</span>
+          <span class="thesis-badge ${isSoon ? 'alert' : 'ok'}">${e["類型"]}</span>
+        </div>
+        <p class="thesis-metric">${e["日期"] || "日期未知，詳見備註"}</p>
+        <p class="thesis-note">${e["備註"] || ""}</p>
+      </div>`;
+  }).join("");
+}
+
 let chart, candleSeries, ma5Series, ma20Series;
 
 function initChart(){
@@ -1189,8 +1234,8 @@ function setupWatchForm(watchlist){
 }
 
 (async function init(){
-  const [rows, history, news, watchlist, dailySignals, intradaySignals, thesis] = await Promise.all([
-    loadStockData(), loadHistory(), loadNews(), loadWatchlist(), loadSignals(), loadIntradaySignals(), loadThesisTracking(),
+  const [rows, history, news, watchlist, dailySignals, intradaySignals, thesis, catalysts] = await Promise.all([
+    loadStockData(), loadHistory(), loadNews(), loadWatchlist(), loadSignals(), loadIntradaySignals(), loadThesisTracking(), loadCatalystEvents(),
   ]);
   const signals = mergeSignals(dailySignals, intradaySignals);
   document.getElementById("dataDate").textContent = new Date().toLocaleDateString("zh-TW");
@@ -1199,6 +1244,7 @@ function setupWatchForm(watchlist){
   renderDynamic(rows, history, signals);
   renderNews(news);
   renderThesis(thesis);
+  renderCatalysts(catalysts);
   setupChartSection(rows, history);
   setupWatchForm(watchlist);
 })();
@@ -1206,3 +1252,4 @@ function setupWatchForm(watchlist){
 
 </body>
 </html>
+
