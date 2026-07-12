@@ -19,9 +19,9 @@ import requests
 from datetime import datetime, timedelta
 
 from monitor import (
-    CORE_WATCHLIST, DATA_DIR, HISTORY_FILE_NAME, HISTORY_MAX_DAYS,
-    compute_ma, compute_kd, compute_macd, compute_rsi,
-    fetch_dividend_events, adjust_series_for_dividends,
+    CORE_WATCHLIST, DATA_DIR, HISTORY_FILE_NAME, HISTORY_MAX_DAYS, TAIEX_ID,
+    compute_ma, compute_kd, compute_macd, compute_rsi, _attach_technical_indicators,
+    fetch_dividend_events, adjust_series_for_dividends, fetch_index_month_ohlc,
 )
 
 # 要回補幾個月的資料（6個月大約可以讓 MA20、KD、支撐壓力這些指標都有足夠資料可算）
@@ -86,6 +86,23 @@ def backfill_stock(stock_id: str) -> list:
     return sorted_rows[-HISTORY_MAX_DAYS:]
 
 
+def backfill_taiex() -> list:
+    """回補大盤指數過去 BACKFILL_MONTHS 個月的資料，回傳依日期排序的OHLC清單"""
+    all_rows = []
+    today = datetime.now()
+    for i in range(BACKFILL_MONTHS, 0, -1):
+        target = today - timedelta(days=30 * i)
+        rows = fetch_index_month_ohlc(target.year, target.month)
+        all_rows.extend(rows)
+        time.sleep(0.5)
+
+    seen = {}
+    for r in all_rows:
+        seen[r["date"]] = r
+    sorted_rows = [seen[d] for d in sorted(seen.keys())]
+    return sorted_rows[-HISTORY_MAX_DAYS:]
+
+
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     history_path = os.path.join(DATA_DIR, HISTORY_FILE_NAME)
@@ -113,27 +130,19 @@ def main():
         except Exception as e:
             print(f"  {stock_id} 除權息調整失敗，使用原始價格：{e}")
 
-        closes = [r["close"] for r in rows]
-        highs = [r["high"] for r in rows]
-        lows = [r["low"] for r in rows]
-        ma5 = compute_ma(closes, 5)
-        ma20 = compute_ma(closes, 20)
-        ma60 = compute_ma(closes, 60)
-        k_vals, d_vals = compute_kd(highs, lows, closes)
-        dif_vals, dea_vals = compute_macd(closes)
-        rsi_vals = compute_rsi(closes)
-        for i, r in enumerate(rows):
-            r["ma5"] = ma5[i]
-            r["ma20"] = ma20[i]
-            r["ma60"] = ma60[i]
-            r["k"] = k_vals[i]
-            r["d"] = d_vals[i]
-            r["dif"] = dif_vals[i]
-            r["dea"] = dea_vals[i]
-            r["rsi"] = rsi_vals[i]
+        rows = _attach_technical_indicators(rows)
 
         history[stock_id] = rows
         print(f"  完成，共 {len(rows)} 筆")
+
+    print("回補大盤指數（發行量加權股價指數）...")
+    taiex_rows = backfill_taiex()
+    if taiex_rows:
+        taiex_rows = _attach_technical_indicators(taiex_rows)
+        history[TAIEX_ID] = taiex_rows
+        print(f"  完成，共 {len(taiex_rows)} 筆")
+    else:
+        print("  沒有抓到大盤指數資料，略過")
 
     with open(history_path, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False)
@@ -143,6 +152,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
