@@ -15,6 +15,7 @@ import json
 import requests
 import pandas as pd
 from datetime import datetime
+from collections import defaultdict
 
 # ============================================================
 # 0. 設定區 —— 之後全部改成你自己的清單/門檻即可
@@ -677,6 +678,31 @@ def compute_rsi(closes: list, period: int = 14):
     return result
 
 
+def compute_bollinger_bands(closes: list, period: int = 20, num_std: float = 2.0):
+    """
+    布林通道：中軌是MA20（跟你現有的MA20是同一條線），上下軌是中軌 ± N倍標準差，
+    用來衡量「股價相對於自己近期的正常波動範圍，現在是不是偏離太多」，
+    這跟MA交叉、KD、MACD這些「兩條線交叉」的邏輯不一樣，是額外的一個視角。
+    也可以用「通道寬窄」判斷目前是盤整（通道窄）還是趨勢明顯（通道寬）。
+    回傳 (upper_list, middle_list, lower_list)，資料不夠的天數為 None。
+    """
+    n = len(closes)
+    upper, middle, lower = [None] * n, [None] * n, [None] * n
+    if n < period:
+        return upper, middle, lower
+
+    for i in range(period - 1, n):
+        window = closes[i - period + 1:i + 1]
+        mean = sum(window) / period
+        variance = sum((x - mean) ** 2 for x in window) / period
+        std = variance ** 0.5
+        middle[i] = round(mean, 3)
+        upper[i] = round(mean + num_std * std, 3)
+        lower[i] = round(mean - num_std * std, 3)
+
+    return upper, middle, lower
+
+
 def compute_atr(highs: list, lows: list, closes: list, period: int = 14):
     """
     ATR（真實波動幅度均值），用 Wilder's Smoothing（跟RSI同一種算法）。
@@ -843,6 +869,7 @@ def _attach_technical_indicators(series: list) -> list:
     dif_vals, dea_vals = compute_macd(closes)
     rsi_vals = compute_rsi(closes)
     atr_vals = compute_atr(highs, lows, closes)
+    bb_upper, bb_middle, bb_lower = compute_bollinger_bands(closes)
     for i, h in enumerate(series):
         h["ma5"] = ma5[i]
         h["ma20"] = ma20[i]
@@ -853,6 +880,9 @@ def _attach_technical_indicators(series: list) -> list:
         h["dea"] = dea_vals[i]
         h["rsi"] = rsi_vals[i]
         h["atr"] = atr_vals[i]
+        h["bb_upper"] = bb_upper[i]
+        h["bb_middle"] = bb_middle[i]
+        h["bb_lower"] = bb_lower[i]
     return series
 
 
@@ -1170,6 +1200,8 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
     - RSI超買超賣：RSI由下往上穿越70（超買，偏空參考）／由上往下穿越30（超賣，偏多參考）
     - 支撐/壓力突破：今日收盤價突破近N日高點（偏多）或跌破近N日低點（偏空）
     - 背離：MACD／RSI背離（頂背離偏空參考／底背離偏多參考），比單純指標交叉更有反轉參考價值
+    - 布林通道：股價觸及上軌（偏空參考）／觸及下軌（偏多參考），跟MA/KD/MACD這類「交叉型」邏輯不同，
+      是看股價相對於自己近期波動範圍的位置；通道明顯收窄是中性資訊，代表近期波動縮小
 
     每個訊號都會加註是否有「放量確認」：業界常見標準是當日成交量達到
     近5日均量的1.5倍以上，視為放量，訊號可信度較高；沒放量則標示「量能未明顯放大」。
@@ -1259,6 +1291,24 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
                 hits.append(f"突破近{breakout_window}日壓力（偏多參考{volume_note}）")
             elif today["close"] < recent_low:
                 hits.append(f"跌破近{breakout_window}日支撐（偏空參考{volume_note}）")
+
+        # 布林通道：股價相對於自己近期正常波動範圍的位置，跟MA/KD/MACD這類「交叉型」訊號邏輯不同
+        if today.get("bb_upper") is not None and today.get("bb_lower") is not None:
+            if today["close"] > today["bb_upper"]:
+                hits.append("布林通道觸及上軌（簡化判斷，偏空參考，短線可能過熱）")
+            elif today["close"] < today["bb_lower"]:
+                hits.append("布林通道觸及下軌（簡化判斷，偏多參考，短線可能超跌）")
+
+            # 通道收窄：band寬度相對於中軌的比例，是近期20天內最窄的區間之一，代表最近波動明顯縮小
+            # 這是中性、非方向性的資訊（歷史上通道收窄後常接著變盤，但不預設方向）
+            band_width_pct = (today["bb_upper"] - today["bb_lower"]) / today["bb_middle"] if today["bb_middle"] else None
+            recent_widths = [
+                (h["bb_upper"] - h["bb_lower"]) / h["bb_middle"]
+                for h in series[-20:]
+                if h.get("bb_upper") is not None and h.get("bb_middle")
+            ]
+            if band_width_pct is not None and len(recent_widths) >= 10 and band_width_pct <= min(recent_widths):
+                hits.append("布林通道明顯收窄（近期波動縮小，中性資訊，留意變盤）")
 
         # K線型態（錘子/吊人/吞噬/晨星暮星）+ 簡化版雙重頂底 + MACD/RSI背離
         hits.extend(detect_candlestick_patterns(series))
@@ -1427,6 +1477,29 @@ def build_cross_check_note(direction: str, flow_by_institution: dict):
     return None
 
 
+def _signal_category(text: str) -> str:
+    """
+    把訊號文字歸類到對應的技術分析面向，用來做「跨面向交叉比對」。
+    同一個面向裡出現好幾個訊號，本質上常常是同一件事的不同講法
+    （例如同時出現MA黃金交叉又KD黃金交叉，都是動能轉強的跡象，關聯性很高，
+    不該被當成兩個獨立證據）；真正有意義的交叉驗證，是看「不同面向」
+    是否都指向同一個方向。
+    """
+    if "背離" in text:
+        return "反轉背離"
+    if any(k in text for k in ["錘子線", "吊人線", "吞噬", "晨星", "暮星", "雙重頂", "雙重底"]):
+        return "K線型態"
+    if "布林通道" in text:
+        return "波動通道"
+    if "RSI超買" in text or "RSI超賣" in text:
+        return "動能極值"
+    if "突破" in text or "跌破" in text:
+        return "價格突破"
+    if any(k in text for k in ["MA黃金", "MA死亡", "KD黃金", "KD死亡", "MACD黃金", "MACD死亡"]):
+        return "趨勢動能交叉"
+    return "其他"
+
+
 def _signal_weight(text: str) -> float:
     """
     幫每種訊號類型分配一個權重，用在計分時取代原本「每個訊號都算1分」的簡單加總。
@@ -1447,29 +1520,35 @@ def _signal_weight(text: str) -> float:
 
 def build_direction_suggestion(signals: list, trend=None):
     """
-    把同一檔股票當天所有技術訊號的方向加總，變成一個簡單的「建議」標籤。
-    這是「規則式計分」（多方訊號權重總和 vs 空方訊號權重總和），不是AI生成的分析，
-    多空訊號同時出現時如實呈現「訊號不一致」，不會硬湊出一個方向。
+    把同一檔股票當天的技術訊號，分兩層算出一個「建議」標籤：
 
-    每個訊號依照 _signal_weight() 給予不同權重，而不是每個都算1分——
-    背離、有放量確認的訊號權重較高，單根K棒型態權重較低，理由見 _signal_weight() 說明。
+    第一層（面向內計分）：先用 _signal_category() 把訊號分成幾個技術面向
+    （趨勢動能交叉／動能極值／K線型態／反轉背離／價格突破／波動通道），
+    同一面向內用 _signal_weight() 加權計分，得出這個面向整體是偏多、偏空、還是不明確。
+    這一層是為了避免「同一件事講很多遍」被誤認成很多獨立證據——
+    例如MA黃金交叉+KD黃金交叉本質上都是動能轉強的同一種訊息，不該疊加成兩倍份量。
+
+    第二層（跨面向交叉比對）：看有幾個「不同面向」彼此獨立地指向同一個方向。
+    一致的面向數越多，代表這個判斷是被多個不同角度交叉驗證過的，不是只靠單一指標，
+    參考價值通常比單一面向的訊號更高，用「強烈／中等／初步」標註這個差異。
+
+    這整套仍然是「規則式比對」，不是AI生成的分析，多空面向數相同時如實呈現「意見分歧」，
+    不會硬湊出一個方向。
 
     trend（"多"或"空"，來自MA60趨勢判斷）：如果有提供，「逆勢」訊號不會被計入分數
     （例如目前站上MA60的多頭環境下出現的偏空訊號，計分時會被排除），
     但訊號本身仍完整顯示在⚡清單裡，不會被隱藏——只是不會拿來當作建議依據。
-    這是為了避免盤整格局裡逆勢的雜訊訊號誤導整體建議方向。
 
     同樣的道理，標註「近期訊號反覆，可信度較低」的訊號（訊號確認期判斷出來的）
-    也不會被計入分數，理由一致：這類訊號在盤整格局容易誤導建議方向。
-    「今日振幅異常」這類中性、非方向性的訊號，本來就不含方向關鍵字，天然不會被計入。
+    也不會被計入分數。「今日振幅異常」「布林通道收窄」這類中性、非方向性的訊號，
+    本來就不含方向關鍵字，天然不會被計入。
 
     回傳 (建議文字, 方向)：
-    - 方向是 "多"、"空"、或 None（沒有方向性訊號、或多空打平時為 None，代表無法用來做交叉比對）
+    - 方向是 "多"、"空"、或 None（沒有方向性面向、或面向數打平時為 None，代表無法用來做交叉比對）
     - 建議文字沒有東西可顯示時為 None
     ※ 僅供參考，不構成投資建議
     """
-    bull = 0.0
-    bear = 0.0
+    category_scores = defaultdict(lambda: {"多": 0.0, "空": 0.0})
     excluded = 0
     for s in signals:
         d = classify_signal_direction(s)
@@ -1481,13 +1560,17 @@ def build_direction_suggestion(signals: list, trend=None):
         if trend and d != trend:
             excluded += 1
             continue
-        w = _signal_weight(s)
-        if d == "多":
-            bull += w
-        else:
-            bear += w
+        category_scores[_signal_category(s)][d] += _signal_weight(s)
 
-    if bull == 0 and bear == 0:
+    category_direction = {}
+    for cat, score in category_scores.items():
+        if score["多"] > score["空"]:
+            category_direction[cat] = "多"
+        elif score["空"] > score["多"]:
+            category_direction[cat] = "空"
+        # 面向內部剛好打平的情況很少見，這種面向不計入方向，但不影響其他面向判斷
+
+    if not category_direction:
         return None, None
 
     trend_note = ""
@@ -1497,12 +1580,29 @@ def build_direction_suggestion(signals: list, trend=None):
     if excluded:
         trend_note += f"，{excluded}項逆勢或訊號反覆的項目未計入"
 
-    if bull > bear:
-        return f"📈 建議偏多（多方權重{bull:.1f} vs 空方權重{bear:.1f}{trend_note}）", "多"
-    elif bear > bull:
-        return f"📉 建議偏空（空方權重{bear:.1f} vs 多方權重{bull:.1f}{trend_note}）", "空"
+    bull_categories = [c for c, d in category_direction.items() if d == "多"]
+    bear_categories = [c for c, d in category_direction.items() if d == "空"]
+
+    if len(bull_categories) == len(bear_categories):
+        cats_text = "、".join(sorted(category_direction.keys()))
+        return f"⚖️ 各面向訊號不一致（{cats_text}意見分歧），建議觀望{trend_note}", None
+
+    if len(bull_categories) > len(bear_categories):
+        direction, agree, oppose = "多", bull_categories, bear_categories
     else:
-        return f"⚖️ 訊號不一致（多空權重同為{bull:.1f}），建議觀望{trend_note}", None
+        direction, agree, oppose = "空", bear_categories, bull_categories
+
+    icon = "📈" if direction == "多" else "📉"
+    label = "偏多" if direction == "多" else "偏空"
+    if len(agree) >= 3 and not oppose:
+        strength = "🔥強烈"
+    elif len(agree) >= 2:
+        strength = "中等"
+    else:
+        strength = "初步"
+    oppose_note = f"，但{'、'.join(oppose)}面向相反" if oppose else ""
+
+    return f"{icon} {strength}建議{label}（{len(agree)}個獨立面向一致：{'、'.join(agree)}{oppose_note}{trend_note}）", direction
 
 
 DIVIDER = "━━━━━━━━━━━━━━"
@@ -1512,30 +1612,35 @@ def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [f"📊 台股每日監控　{today}", DIVIDER]
 
-    lines.append("【核心自選股】")
+    lines.append("【核心自選股：有買進／賣出訊號】")
+    shown_count = 0
     for s in core_signals:
         code = str(s['代號'])
+        full_signals = (buy_sell_signals or {}).get(code, [])
+        trend = (trend_by_code or {}).get(code)
+        suggestion, direction = build_direction_suggestion(full_signals, trend)
+        if direction is None:
+            continue  # 沒有明確買進/賣出方向（沒訊號、或各面向意見分歧）的股票不顯示
+
+        shown_count += 1
         chg_amount = s.get('漲跌金額', 0)
         sign = "+" if chg_amount >= 0 else ""
         dot = "🔴" if chg_amount >= 0 else "🟢"  # 跟網頁K線圖同色系：紅漲綠跌
         line = f"{dot} {code} {s['名稱']}　{s['收盤價']}　{sign}{chg_amount}（{sign}{s['漲跌幅%']}%）"
-        if buy_sell_signals and buy_sell_signals.get(code):
-            full_signals = buy_sell_signals[code]
-            short_labels = [shorten_signal_label(sig) for sig in full_signals]
-            line += "\n　　⚡ " + "、".join(short_labels)
-            trend = (trend_by_code or {}).get(code)
-            suggestion, direction = build_direction_suggestion(full_signals, trend)
-            if suggestion:
-                line += f"\n　　{suggestion}"
-            if direction:
-                flow_by_institution = classify_all_institutions_flow(code, inst_df)
-                cross_note = build_cross_check_note(direction, flow_by_institution)
-                if cross_note:
-                    line += f"\n　　{cross_note}"
-                market_note = build_market_alignment_note(direction, market_trend)
-                if market_note:
-                    line += f"\n　　{market_note}"
+        short_labels = [shorten_signal_label(sig) for sig in full_signals]
+        line += "\n　　⚡ " + "、".join(short_labels)
+        line += f"\n　　{suggestion}"
+        flow_by_institution = classify_all_institutions_flow(code, inst_df)
+        cross_note = build_cross_check_note(direction, flow_by_institution)
+        if cross_note:
+            line += f"\n　　{cross_note}"
+        market_note = build_market_alignment_note(direction, market_trend)
+        if market_note:
+            line += f"\n　　{market_note}"
         lines.append(line)
+
+    if shown_count == 0:
+        lines.append("目前核心自選股沒有明確的買進／賣出訊號")
 
     lookup = market_df.set_index(market_df["證券代號"].astype(str))
     for category, ids in dynamic_watchlist.items():
