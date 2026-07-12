@@ -68,15 +68,66 @@ def fetch_month_ohlc(stock_id: str, year: int, month: int) -> list:
     return rows
 
 
+def fetch_otc_stock_month_ohlc(stock_id: str, year: int, month: int) -> list:
+    """
+    抓取上櫃個股某個月份的完整每日OHLC，用途是回補上櫃股票的歷史資料。
+    資料源：櫃買中心「個股日成交資訊」（st43_result），用法跟上市股票的 STOCK_DAY 端點類似，
+    但回傳的JSON鍵值是 "aaData"（不是"data"），日期參數也是民國年格式（如 "115/07"）。
+    回傳 [{"date":"2026-01-05","open":...,"high":...,"low":...,"close":...}, ...]
+    """
+    roc_year = year - 1911
+    date_str = f"{roc_year}/{month:02d}"
+    url = "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php"
+    params = {"d": date_str, "stkno": stock_id}
+    try:
+        resp = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"  {stock_id}（上櫃）{year}-{month:02d} 抓取失敗：{e}")
+        return []
+
+    rows_raw = data.get("aaData", [])
+    # 欄位順序：日期,成交股數,成交金額,開盤價,最高價,最低價,收盤價,漲跌價差,成交筆數（跟上市STOCK_DAY同順序）
+    rows = []
+    for row in rows_raw:
+        try:
+            roc_date = row[0]
+            y, m, d = roc_date.split("/")
+            date_str_out = f"{int(y) + 1911}-{int(m):02d}-{int(d):02d}"
+            rows.append({
+                "date": date_str_out,
+                "open": float(str(row[3]).replace(",", "")),
+                "high": float(str(row[4]).replace(",", "")),
+                "low": float(str(row[5]).replace(",", "")),
+                "close": float(str(row[6]).replace(",", "")),
+                "volume": float(str(row[1]).replace(",", "")),
+            })
+        except (ValueError, IndexError):
+            continue
+    return rows
+
+
+def fetch_month_ohlc_any_market(stock_id: str, year: int, month: int) -> list:
+    """
+    先試上市（證交所），抓不到再試上櫃（櫃買中心），這樣不用事先知道每檔股票是上市還是上櫃，
+    程式會自己試出來。兩邊都沒資料（代號打錯、或興櫃/已下市）才會回傳空清單。
+    """
+    rows = fetch_month_ohlc(stock_id, year, month)
+    if rows:
+        return rows
+    return fetch_otc_stock_month_ohlc(stock_id, year, month)
+
+
 def backfill_stock(stock_id: str) -> list:
     """回補單一股票過去 BACKFILL_MONTHS 個月的資料，回傳依日期排序的OHLC清單"""
     all_rows = []
     today = datetime.now()
     for i in range(BACKFILL_MONTHS, 0, -1):
         target = today - timedelta(days=30 * i)
-        rows = fetch_month_ohlc(stock_id, target.year, target.month)
+        rows = fetch_month_ohlc_any_market(stock_id, target.year, target.month)
         all_rows.extend(rows)
-        time.sleep(0.5)  # 避免請求太快被證交所擋掉
+        time.sleep(0.5)  # 避免請求太快被交易所擋掉
 
     # 去重、排序
     seen = {}
