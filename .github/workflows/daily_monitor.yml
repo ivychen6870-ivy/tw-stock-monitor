@@ -50,4 +50,3 @@ jobs:
           # 避免因為重複手動重跑或跟盤中更新撞在一起而卡在 rebase 衝突、導致整個 workflow 失敗
           git merge -X ours origin/main --no-edit || (git checkout --ours docs/data/ && git add docs/data/ && git commit --no-edit)
           git push origin HEAD:main
-
