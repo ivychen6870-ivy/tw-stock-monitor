@@ -677,6 +677,40 @@ def compute_rsi(closes: list, period: int = 14):
     return result
 
 
+def compute_atr(highs: list, lows: list, closes: list, period: int = 14):
+    """
+    ATR（真實波動幅度均值），用 Wilder's Smoothing（跟RSI同一種算法）。
+    衡量這檔股票「正常情況下」一天大概會震盪多少，用來判斷「今天的漲跌算不算異常」，
+    而不是用同一個固定百分比套用在所有股票上——波動大的股票（例如航運股）
+    跟波動小的股票（例如金融股），「異常」的定義本來就不該一樣。
+    回傳 atr_list，資料不夠的天數為 None。
+    """
+    n = len(closes)
+    result = [None] * n
+    if n < period + 1:
+        return result
+
+    tr_list = [None] * n
+    for i in range(1, n):
+        tr_list[i] = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+
+    first_window = [v for v in tr_list[1:period + 1] if v is not None]
+    if len(first_window) < period:
+        return result
+
+    atr = sum(first_window) / period
+    result[period] = round(atr, 3)
+    for i in range(period + 1, n):
+        atr = (atr * (period - 1) + tr_list[i]) / period
+        result[i] = round(atr, 3)
+
+    return result
+
+
 def fetch_dividend_events(stock_id: str, start_date: str, end_date: str) -> list:
     """
     抓取指定股票在區間內的除權息事件（免費，證交所TWT49U端點）。
@@ -808,6 +842,7 @@ def _attach_technical_indicators(series: list) -> list:
     k_vals, d_vals = compute_kd(highs, lows, closes)
     dif_vals, dea_vals = compute_macd(closes)
     rsi_vals = compute_rsi(closes)
+    atr_vals = compute_atr(highs, lows, closes)
     for i, h in enumerate(series):
         h["ma5"] = ma5[i]
         h["ma20"] = ma20[i]
@@ -817,6 +852,7 @@ def _attach_technical_indicators(series: list) -> list:
         h["dif"] = dif_vals[i]
         h["dea"] = dea_vals[i]
         h["rsi"] = rsi_vals[i]
+        h["atr"] = atr_vals[i]
     return series
 
 
@@ -1230,6 +1266,14 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
         hits.extend(detect_divergence(series, "rsi", "RSI"))
         hits.extend(detect_divergence(series, "dif", "MACD"))
 
+        # 波動度基準：今日振幅（最高-最低）vs ATR，用來判斷今天的漲跌算不算「異常放大」
+        # 這是中性、非方向性的資訊，不影響多空計分，純粹提供「今天波動是不是比平常劇烈」的參考
+        if today.get("atr") and today["atr"] > 0:
+            today_range = today["high"] - today["low"]
+            ratio = today_range / today["atr"]
+            if ratio >= 2:
+                hits.append(f"今日振幅達近期正常波動的{round(ratio, 1)}倍（波動明顯放大，中性資訊，不代表方向）")
+
         if hits:
             signals[stock_id] = hits
 
@@ -1383,11 +1427,32 @@ def build_cross_check_note(direction: str, flow_by_institution: dict):
     return None
 
 
+def _signal_weight(text: str) -> float:
+    """
+    幫每種訊號類型分配一個權重，用在計分時取代原本「每個訊號都算1分」的簡單加總。
+    這是根據技術分析常見的可信度分級做的粗略調整，不是精確的統計驗證結果，僅供參考：
+    - 背離（頂/底背離）：權重較高（1.5），業界普遍認為比單純交叉更有反轉參考價值
+    - 有放量確認的訊號：權重較高（1.3），成交量佐證讓訊號更可信
+    - 單根/組合K棒型態（錘子、吊人、吞噬、晨星、暮星）：權重較低（0.7），容易受單日雜訊影響
+    - 其餘（一般MA/KD/MACD交叉、無放量確認的突破/跌破、RSI超買超賣）：標準權重（1.0）
+    """
+    if "背離" in text:
+        return 1.5
+    if "有放量確認" in text:
+        return 1.3
+    if any(k in text for k in ["錘子線", "吊人線", "吞噬", "晨星", "暮星"]):
+        return 0.7
+    return 1.0
+
+
 def build_direction_suggestion(signals: list, trend=None):
     """
     把同一檔股票當天所有技術訊號的方向加總，變成一個簡單的「建議」標籤。
-    這是「規則式計分」（多方訊號數 vs 空方訊號數），不是AI生成的分析，
+    這是「規則式計分」（多方訊號權重總和 vs 空方訊號權重總和），不是AI生成的分析，
     多空訊號同時出現時如實呈現「訊號不一致」，不會硬湊出一個方向。
+
+    每個訊號依照 _signal_weight() 給予不同權重，而不是每個都算1分——
+    背離、有放量確認的訊號權重較高，單根K棒型態權重較低，理由見 _signal_weight() 說明。
 
     trend（"多"或"空"，來自MA60趨勢判斷）：如果有提供，「逆勢」訊號不會被計入分數
     （例如目前站上MA60的多頭環境下出現的偏空訊號，計分時會被排除），
@@ -1396,14 +1461,15 @@ def build_direction_suggestion(signals: list, trend=None):
 
     同樣的道理，標註「近期訊號反覆，可信度較低」的訊號（訊號確認期判斷出來的）
     也不會被計入分數，理由一致：這類訊號在盤整格局容易誤導建議方向。
+    「今日振幅異常」這類中性、非方向性的訊號，本來就不含方向關鍵字，天然不會被計入。
 
     回傳 (建議文字, 方向)：
     - 方向是 "多"、"空"、或 None（沒有方向性訊號、或多空打平時為 None，代表無法用來做交叉比對）
     - 建議文字沒有東西可顯示時為 None
     ※ 僅供參考，不構成投資建議
     """
-    bull = 0
-    bear = 0
+    bull = 0.0
+    bear = 0.0
     excluded = 0
     for s in signals:
         d = classify_signal_direction(s)
@@ -1415,10 +1481,11 @@ def build_direction_suggestion(signals: list, trend=None):
         if trend and d != trend:
             excluded += 1
             continue
+        w = _signal_weight(s)
         if d == "多":
-            bull += 1
+            bull += w
         else:
-            bear += 1
+            bear += w
 
     if bull == 0 and bear == 0:
         return None, None
@@ -1431,11 +1498,11 @@ def build_direction_suggestion(signals: list, trend=None):
         trend_note += f"，{excluded}項逆勢或訊號反覆的項目未計入"
 
     if bull > bear:
-        return f"📈 建議偏多（{bull}項多方訊號 vs {bear}項空方訊號{trend_note}）", "多"
+        return f"📈 建議偏多（多方權重{bull:.1f} vs 空方權重{bear:.1f}{trend_note}）", "多"
     elif bear > bull:
-        return f"📉 建議偏空（{bear}項空方訊號 vs {bull}項多方訊號{trend_note}）", "空"
+        return f"📉 建議偏空（空方權重{bear:.1f} vs 多方權重{bull:.1f}{trend_note}）", "空"
     else:
-        return f"⚖️ 訊號不一致（多空各{bull}項），建議觀望{trend_note}", None
+        return f"⚖️ 訊號不一致（多空權重同為{bull:.1f}），建議觀望{trend_note}", None
 
 
 DIVIDER = "━━━━━━━━━━━━━━"
