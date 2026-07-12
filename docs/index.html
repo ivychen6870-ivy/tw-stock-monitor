@@ -101,6 +101,11 @@
 
   main{padding:32px 0 80px;}
 
+  main > section{margin-bottom:40px;}
+  main > section:last-child{margin-bottom:0;}
+  /* 摘要+核心自選股是「每天優先看」的主要區塊，跟底下的次要/參考區塊之間留更明顯的間距分隔 */
+  .primary-zone-end{margin-bottom:56px;}
+
   .section-label{
     font-family:var(--mono);
     font-size:12px;
@@ -117,6 +122,52 @@
     flex:1;
     height:1px;
     background:var(--line);
+  }
+  .section-label-primary{
+    font-family:var(--display);
+    font-size:20px;
+    font-weight:700;
+    color:var(--text);
+    letter-spacing:0;
+    text-transform:none;
+  }
+  .section-label-primary::after{
+    background:var(--line);
+  }
+
+  .summary-strip{
+    display:flex;
+    flex-wrap:wrap;
+    border:1px solid var(--line);
+    border-radius:12px;
+    overflow:hidden;
+    background:var(--panel);
+  }
+  .summary-stat{
+    flex:1 1 110px;
+    padding:18px 14px;
+    text-align:center;
+    border-right:1px solid var(--line);
+  }
+  .summary-stat:last-child{border-right:none;}
+  .summary-value{
+    font-family:var(--mono);
+    font-size:26px;
+    font-weight:700;
+    margin:0 0 4px;
+    color:var(--text);
+    line-height:1;
+  }
+  .summary-value.up{color:var(--up);}
+  .summary-value.down{color:var(--down);}
+  .summary-label{
+    font-size:11.5px;
+    color:var(--muted);
+    margin:0;
+  }
+  @media (max-width:640px){
+    .summary-stat{flex:1 1 45%;border-bottom:1px solid var(--line);}
+    .summary-value{font-size:22px;}
   }
 
   .core-grid{
@@ -240,7 +291,10 @@
     font-size:10.5px;
     padding:3px 8px;
     border-radius:5px;
-    white-space:nowrap;
+    white-space:normal;
+    max-width:100%;
+    word-break:break-word;
+    line-height:1.4;
   }
   .signal-badge.buy{background:#FDEDED;color:var(--up);}
   .signal-badge.sell{background:#E9F6EE;color:var(--down);}
@@ -582,7 +636,12 @@
   <main>
 
     <section>
-      <p class="section-label">核心自選股</p>
+      <p class="section-label section-label-primary">今日重點摘要</p>
+      <div class="summary-strip" id="summaryStrip"></div>
+    </section>
+
+    <section class="primary-zone-end">
+      <p class="section-label section-label-primary">核心自選股</p>
       <div class="core-grid" id="coreGrid"></div>
     </section>
 
@@ -722,17 +781,27 @@
     </section>
 
     <section>
-      <p class="section-label">投資論點追蹤（規則式比對，非AI生成分析）</p>
-      <div class="thesis-panel" id="thesisPanel"></div>
+      <details class="collapse-card">
+        <summary class="collapse-summary">
+          <span class="section-label-inline">投資論點追蹤（規則式比對，非AI生成分析）</span>
+          <span class="collapse-hint">點擊展開／收合</span>
+        </summary>
+        <div class="thesis-panel" id="thesisPanel"></div>
+      </details>
     </section>
 
     <section>
-      <p class="section-label">催化事件追蹤（股東會／法說會，僅供參考）</p>
-      <div class="thesis-panel" id="catalystPanel"></div>
-      <p class="signal-disclaimer">
-        股東會日期來自證交所結構化資料，涵蓋率高；法說會日期為重大訊息公告關鍵字比對，
-        只涵蓋「有透過重大訊息預告」的公司，不是完整日曆，日期解析不出來時會顯示「詳見備註」。
-      </p>
+      <details class="collapse-card">
+        <summary class="collapse-summary">
+          <span class="section-label-inline">催化事件追蹤（股東會／法說會，僅供參考）</span>
+          <span class="collapse-hint">點擊展開／收合</span>
+        </summary>
+        <div class="thesis-panel" id="catalystPanel"></div>
+        <p class="signal-disclaimer">
+          股東會日期來自證交所結構化資料，涵蓋率高；法說會日期為重大訊息公告關鍵字比對，
+          只涵蓋「有透過重大訊息預告」的公司，不是完整日曆，日期解析不出來時會顯示「詳見備註」。
+        </p>
+      </details>
     </section>
 
     <section>
@@ -769,6 +838,7 @@
   設定：這裡要填入你自己的 GitHub 帳號/repo名稱，「送出關注請求」按鈕才能正確導向。
 */
 const GITHUB_REPO = "ivychen6870-ivy/tw-stock-monitor";
+const TAIEX_CODE = "TAIEX";  // 跟 monitor.py 的 TAIEX_ID 對應一致，history.json 裡大盤指數的鍵值
 
 /*
   資料讀取邏輯：
@@ -819,8 +889,8 @@ const DEMO_NEWS = [
 const DEMO_WATCHLIST = { core:["2330","2317","2454","0050"], extra:[] };
 
 const DEMO_THESIS = [
-  { "代號":"2330", "門檻%":20, "實際年增%":26.5, "狀態":"符合預期（實際年增26.5% ≥ 門檻20%）", "備註":"看好AI晶片需求持續帶動先進製程營收成長" },
-  { "代號":"3481", "門檻%":0, "實際年增%":-3.2, "狀態":"低於預期（實際年增-3.2% < 門檻0%），建議重新檢視論點", "備註":"面板產業止跌回升，觀察營收是否轉正" },
+  { "代號":"2330", "名稱":"台積電", "門檻%":20, "實際年增%":26.5, "狀態":"符合預期（實際年增26.5% ≥ 門檻20%）", "備註":"看好AI晶片需求持續帶動先進製程營收成長" },
+  { "代號":"3481", "名稱":"群創", "門檻%":0, "實際年增%":-3.2, "狀態":"低於預期（實際年增-3.2% < 門檻0%），建議重新檢視論點", "備註":"面板產業止跌回升，觀察營收是否轉正" },
 ];
 
 // 每次頁面載入時產生一個固定的快取破壞參數，讓所有資料檔案的網址都變成「全新的」，
@@ -971,6 +1041,14 @@ function formatVolume(shares){
   return lots.toLocaleString("zh-TW") + " 張";
 }
 
+function shortenSignalLabel(text){
+  // 跟LINE推播用的縮短邏輯一致：只留關鍵字，完整說明改放在title提示（滑鼠移過去會顯示）
+  let short = text.split("（")[0];
+  short = short.replace(/近\d+日/g, "");
+  short = short.split("/")[0];
+  return short;
+}
+
 function buildStockCardHtml(r, history, signals){
   const dir = r.chg >= 0 ? "up" : "down";
   const sign = r.chg >= 0 ? "+" : "";
@@ -999,7 +1077,7 @@ function buildStockCardHtml(r, history, signals){
   const badgeHtml = hits.length > 0
     ? `<div class="signal-badges">${hits.map(h => {
         const isBuy = h.includes("買進") || h.includes("偏多");
-        return `<span class="signal-badge ${isBuy ? 'buy' : 'sell'}">${h}</span>`;
+        return `<span class="signal-badge ${isBuy ? 'buy' : 'sell'}" title="${h}">${shortenSignalLabel(h)}</span>`;
       }).join("")}</div>`
     : "";
   return `<div class="stock-card ${dir}">
@@ -1071,10 +1149,13 @@ function renderDynamic(rows, history, signals){
   container.innerHTML = Object.entries(categories).map(([cat, items]) => {
     const tableHtml = buildRankingTableHtml(items);
     return `
-      <div class="dynamic-category">
-        <p class="section-label dynamic-sub-label">${cat}排行（命中 ${items.length} 檔）</p>
+      <details class="dynamic-category collapse-card">
+        <summary class="collapse-summary">
+          <span class="section-label-inline">${cat}排行（命中 ${items.length} 檔）</span>
+          <span class="collapse-hint">點擊展開／收合</span>
+        </summary>
         <div class="ranking-table-wrap">${tableHtml}</div>
-      </div>`;
+      </details>`;
   }).join("");
 }
 
@@ -1095,6 +1176,44 @@ function renderNews(newsRows){
   `).join("");
 }
 
+function renderSummary(rows, signals, thesisRows, catalystRows){
+  const container = document.getElementById("summaryStrip");
+  const coreRows = rows.filter(r => r.category === "核心自選股");
+
+  const upCount = coreRows.filter(r => r.chg > 0).length;
+  const downCount = coreRows.filter(r => r.chg < 0).length;
+  const signalCount = coreRows.filter(r => signals && signals[r.code] && signals[r.code].length > 0).length;
+  const limitCount = coreRows.filter(r => r.chg >= 9.5 || r.chg <= -9.5).length;
+
+  const thesisAlertCount = (thesisRows || []).filter(t => (t["狀態"] || "").includes("低於預期")).length;
+
+  const today = new Date();
+  const upcomingCatalystCount = (catalystRows || []).filter(e => {
+    if(!e["日期"]) return false;
+    const parts = e["日期"].split("/").map(Number);
+    if(parts.length !== 3 || parts.some(isNaN)) return false;
+    const d = new Date(parts[0] + 1911, parts[1] - 1, parts[2]);
+    const daysLeft = Math.ceil((d - today) / 86400000);
+    return daysLeft >= 0 && daysLeft <= 7;
+  }).length;
+
+  const stats = [
+    { label: "核心自選股上漲", value: upCount, tone: "up" },
+    { label: "核心自選股下跌", value: downCount, tone: "down" },
+    { label: "有技術訊號", value: signalCount, tone: "neutral" },
+    { label: "漲跌停", value: limitCount, tone: limitCount > 0 ? "up" : "neutral" },
+    { label: "論點需檢視", value: thesisAlertCount, tone: thesisAlertCount > 0 ? "down" : "neutral" },
+    { label: "7天內催化事件", value: upcomingCatalystCount, tone: "neutral" },
+  ];
+
+  container.innerHTML = stats.map(s => `
+    <div class="summary-stat">
+      <p class="summary-value ${s.tone}">${s.value}</p>
+      <p class="summary-label">${s.label}</p>
+    </div>
+  `).join("");
+}
+
 function renderThesis(thesisRows){
   const panel = document.getElementById("thesisPanel");
   if(!thesisRows || thesisRows.length === 0){
@@ -1108,7 +1227,7 @@ function renderThesis(thesisRows){
     return `
       <div class="thesis-card ${isAlert ? 'alert' : 'ok'}">
         <div class="thesis-head">
-          <span class="thesis-code">${t["代號"]}</span>
+          <span class="thesis-code">${t["代號"]}${t["名稱"] ? ` ${t["名稱"]}` : ""}</span>
           <span class="thesis-badge ${isAlert ? 'alert' : 'ok'}">${isAlert ? '⚠ 需檢視' : '✓ 符合預期'}</span>
         </div>
         <p class="thesis-metric">實際年增 <strong>${yoyText}</strong>　門檻 ${t["門檻%"]}%</p>
@@ -1134,7 +1253,7 @@ function renderCatalysts(rows){
     return `
       <div class="thesis-card ${isSoon ? 'alert' : 'ok'}">
         <div class="thesis-head">
-          <span class="thesis-code">${e["代號"]}</span>
+          <span class="thesis-code">${e["代號"]}${e["名稱"] ? ` ${e["名稱"]}` : ""}</span>
           <span class="thesis-badge ${isSoon ? 'alert' : 'ok'}">${e["類型"]}</span>
         </div>
         <p class="thesis-metric">${e["日期"] || "日期未知，詳見備註"}</p>
@@ -1202,11 +1321,17 @@ function setupChartSection(rows, history){
   const select = document.getElementById("chartStockSelect");
   const coreRows = rows.filter(r => r.category === "核心自選股" || history[r.code]);
   const uniqueMap = new Map();
+
+  // 大盤指數固定放第一個選項，一打開這個區塊預設就先看到大盤，不用手動切換
+  if(history[TAIEX_CODE]){
+    uniqueMap.set(TAIEX_CODE, "加權指數（大盤）");
+  }
+
   coreRows.forEach(r => uniqueMap.set(r.code, r.name));
   Object.keys(history).forEach(code => { if(!uniqueMap.has(code)) uniqueMap.set(code, code); });
 
   select.innerHTML = Array.from(uniqueMap.entries())
-    .map(([code, name]) => `<option value="${code}">${code} ${name}</option>`)
+    .map(([code, name]) => `<option value="${code}">${code === TAIEX_CODE ? name : code + " " + name}</option>`)
     .join("");
 
   initChart();
@@ -1240,6 +1365,7 @@ function setupWatchForm(watchlist){
   const signals = mergeSignals(dailySignals, intradaySignals);
   document.getElementById("dataDate").textContent = new Date().toLocaleDateString("zh-TW");
   renderTicker(rows);
+  renderSummary(rows, signals, thesis, catalysts);
   renderCore(rows, history, signals);
   renderDynamic(rows, history, signals);
   renderNews(news);
@@ -1252,4 +1378,3 @@ function setupWatchForm(watchlist){
 
 </body>
 </html>
-
