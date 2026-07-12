@@ -685,6 +685,103 @@ def adjust_series_for_dividends(series: list, events: list) -> list:
                 s["close"] = round(s["close"] * ratio, 2)
     return series
 
+TAIEX_ID = "TAIEX"  # 大盤指數在history.json裡的特殊代號鍵值，不是真的股票代號
+
+
+def fetch_taiex_today() -> dict:
+    """
+    抓取當日大盤（發行量加權股價指數）的開高低收，免費、不需金鑰。
+    資料源：證交所網頁版指數資料（MI_5MINS_HIST）。
+
+    ⚠️ 這個端點沒有像 STOCK_DAY_ALL 那樣經過長期驗證，如果證交所調整過欄位順序或路徑，
+    這裡會抓不到資料並印出錯誤訊息，但不會讓整個程式掛掉——只是大盤指數這次不會更新。
+    回傳 {"open":..., "high":..., "low":..., "close":...} 或 None（抓取失敗時）
+    """
+    today_str = datetime.now().strftime("%Y%m%d")
+    url = f"https://www.twse.com.tw/indicesReport/MI_5MINS_HIST?response=json&date={today_str}"
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data.get("data", [])
+        if not rows:
+            return None
+        last = rows[-1]  # 當天最後一筆（收盤）
+        return {
+            "open": float(str(last[1]).replace(",", "")),
+            "high": float(str(last[2]).replace(",", "")),
+            "low": float(str(last[3]).replace(",", "")),
+            "close": float(str(last[4]).replace(",", "")),
+        }
+    except Exception as e:
+        print(f"抓取大盤指數失敗，略過本次更新：{e}")
+        return None
+
+
+def _attach_technical_indicators(series: list) -> list:
+    """
+    幫一組OHLC歷史資料（個股或大盤指數都適用）計算MA5/MA20/MA60/KD/MACD/RSI，
+    並直接寫回每一天的資料裡。個股歷史更新跟大盤指數更新共用這個函式，避免同樣的計算邏輯寫兩次。
+    """
+    closes = [h["close"] for h in series]
+    highs = [h["high"] for h in series]
+    lows = [h["low"] for h in series]
+    ma5 = compute_ma(closes, 5)
+    ma20 = compute_ma(closes, 20)
+    ma60 = compute_ma(closes, 60)
+    k_vals, d_vals = compute_kd(highs, lows, closes)
+    dif_vals, dea_vals = compute_macd(closes)
+    rsi_vals = compute_rsi(closes)
+    for i, h in enumerate(series):
+        h["ma5"] = ma5[i]
+        h["ma20"] = ma20[i]
+        h["ma60"] = ma60[i]
+        h["k"] = k_vals[i]
+        h["d"] = d_vals[i]
+        h["dif"] = dif_vals[i]
+        h["dea"] = dea_vals[i]
+        h["rsi"] = rsi_vals[i]
+    return series
+
+
+def fetch_index_month_ohlc(year: int, month: int) -> list:
+    """
+    抓取大盤指數（發行量加權股價指數）某個月份的完整每日開高低收，用途是一次性回補歷史資料。
+    資料源：證交所網頁版指數資料（MI_5MINS_HIST），帶該月1號當日期參數，會回傳整個月的資料
+    （用法跟個股的 STOCK_DAY 端點一樣，帶月初日期就會回傳整月）。
+    回傳 [{"date":"2026-01-05","open":...,"high":...,"low":...,"close":...}, ...]
+    """
+    date_str = f"{year}{month:02d}01"
+    url = "https://www.twse.com.tw/indicesReport/MI_5MINS_HIST"
+    params = {"response": "json", "date": date_str}
+    try:
+        resp = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"  大盤指數 {year}-{month:02d} 抓取失敗：{e}")
+        return []
+
+    rows_raw = data.get("data", [])
+    rows = []
+    for row in rows_raw:
+        try:
+            roc_date = row[0]  # 民國年日期，格式如 "115/01/05"
+            y, m, d = roc_date.split("/")
+            date_str_out = f"{int(y) + 1911}-{int(m):02d}-{int(d):02d}"
+            rows.append({
+                "date": date_str_out,
+                "open": float(str(row[1]).replace(",", "")),
+                "high": float(str(row[2]).replace(",", "")),
+                "low": float(str(row[3]).replace(",", "")),
+                "close": float(str(row[4]).replace(",", "")),
+                "volume": 0,
+            })
+        except (ValueError, IndexError):
+            continue
+    return rows
+
+
 def update_price_history(market_df: pd.DataFrame, watch_ids: list) -> dict:
     """
     讀取既有的 docs/data/history.json，把今天監控股票的 OHLC 加進去，
@@ -732,26 +829,16 @@ def update_price_history(market_df: pd.DataFrame, watch_ids: list) -> dict:
         except Exception as e:
             print(f"{stock_id} 除權息調整檢查失敗，略過本次調整：{e}")
 
-        closes = [h["close"] for h in series]
-        highs = [h["high"] for h in series]
-        lows = [h["low"] for h in series]
-        ma5 = compute_ma(closes, 5)
-        ma20 = compute_ma(closes, 20)
-        ma60 = compute_ma(closes, 60)  # 較長期均線，用來判斷目前是多頭環境還是空頭環境（趨勢過濾用）
-        k_vals, d_vals = compute_kd(highs, lows, closes)
-        dif_vals, dea_vals = compute_macd(closes)
-        rsi_vals = compute_rsi(closes)
-        for i, h in enumerate(series):
-            h["ma5"] = ma5[i]
-            h["ma20"] = ma20[i]
-            h["ma60"] = ma60[i]
-            h["k"] = k_vals[i]
-            h["d"] = d_vals[i]
-            h["dif"] = dif_vals[i]
-            h["dea"] = dea_vals[i]
-            h["rsi"] = rsi_vals[i]
-
+        series = _attach_technical_indicators(series)
         history[stock_id] = series
+
+    # 大盤指數（發行量加權股價指數）：跟個股用同一套技術指標算法，但不是股票池的一部分，獨立處理
+    taiex_today = fetch_taiex_today()
+    if taiex_today is not None:
+        taiex_series = [h for h in history.get(TAIEX_ID, []) if h["date"] != today]
+        taiex_series.append({**taiex_today, "date": today, "volume": 0})
+        taiex_series = taiex_series[-HISTORY_MAX_DAYS:]
+        history[TAIEX_ID] = _attach_technical_indicators(taiex_series)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -895,6 +982,73 @@ def detect_chart_patterns(series: list, lookback: int = 40, tolerance: float = 0
     return hits
 
 
+def detect_divergence(series: list, indicator_key: str, indicator_name: str, lookback: int = 40, recent_window: int = 10) -> list:
+    """
+    簡化版的背離偵測（頂背離／底背離），比較「較早一段」跟「最近recent_window天」的價格高低點，
+    以及對應的指標（RSI或MACD的DIF）數值：
+    - 頂背離：最近的高點價格比較早的高點更高（創新高），但指標數值反而更低－ 動能減弱的警示，偏空參考
+    - 底背離：最近的低點價格比較早的低點更低（創新低），但指標數值反而更高－ 動能減弱的警示，偏多參考
+    背離通常被視為比單純的指標交叉更有參考價值的反轉警示訊號，因為它反映「價格創新高/低，
+    但推動力道其實在減弱」，而不是單純兩條線交叉。
+
+    ⚠️ 這是簡化的兩段高低點比對法，不是嚴謹的波段辨識演算法，容易受雜訊影響，僅供參考。
+    """
+    hits = []
+    window = series[-lookback:] if len(series) > lookback else series
+    n = len(window)
+    if n < 20:
+        return hits
+
+    closes = [h["close"] for h in window]
+    indicators = [h.get(indicator_key) for h in window]
+    if any(v is None for v in indicators):
+        return hits  # 資料不足（例如剛開始還沒累積夠天數算出RSI/MACD）時不判斷，避免誤判
+
+    recent_start = n - recent_window
+    earlier = closes[:recent_start]
+    if len(earlier) < 5:
+        return hits
+
+    # 頂背離：較早段的最高點 vs 最近recent_window天的最高點
+    earlier_peak_idx = closes.index(max(earlier))  # 用closes.index確保拿到window裡對應的絕對位置
+    recent_peak_idx = recent_start + closes[recent_start:].index(max(closes[recent_start:]))
+    if closes[recent_peak_idx] > closes[earlier_peak_idx] and indicators[recent_peak_idx] < indicators[earlier_peak_idx]:
+        hits.append(f"{indicator_name}頂背離（簡化判斷，偏空參考）")
+
+    # 底背離：較早段的最低點 vs 最近recent_window天的最低點
+    earlier_trough_idx = closes.index(min(earlier))
+    recent_trough_idx = recent_start + closes[recent_start:].index(min(closes[recent_start:]))
+    if closes[recent_trough_idx] < closes[earlier_trough_idx] and indicators[recent_trough_idx] > indicators[earlier_trough_idx]:
+        hits.append(f"{indicator_name}底背離（簡化判斷，偏多參考）")
+
+    return hits
+
+
+def _had_recent_opposite_cross(series: list, fast_key: str, slow_key: str, current_direction: str, lookback: int = 5) -> bool:
+    """
+    訊號確認期用：檢查同一組指標（例如ma5/ma20）在最近lookback天內（不含今天），
+    是否已經出現過「方向相反」的交叉。如果有，代表這組指標最近訊號來回反覆
+    （常見於盤整格局），這次的交叉可信度會打折扣，用來標註「近期訊號反覆」。
+    current_direction: "黃金" 或 "死亡"（這次偵測到的交叉方向）
+    """
+    window = series[-(lookback + 2):-1]  # 不含今天，看今天以前最近lookback+1天
+    if len(window) < 2:
+        return False
+    for i in range(1, len(window)):
+        prev, cur = window[i - 1], window[i]
+        if any(v is None for v in [prev.get(fast_key), prev.get(slow_key), cur.get(fast_key), cur.get(slow_key)]):
+            continue
+        if prev[fast_key] <= prev[slow_key] and cur[fast_key] > cur[slow_key]:
+            cross_dir = "黃金"
+        elif prev[fast_key] >= prev[slow_key] and cur[fast_key] < cur[slow_key]:
+            cross_dir = "死亡"
+        else:
+            continue
+        if cross_dir != current_direction:
+            return True
+    return False
+
+
 def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int = 20):
     """
     針對監控股票，比對「今天 vs 昨天」的技術指標狀態，偵測以下訊號：
@@ -903,9 +1057,14 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
     - MACD交叉：DIF穿越DEA信號線（黃金交叉＝買進參考／死亡交叉＝賣出參考）
     - RSI超買超賣：RSI由下往上穿越70（超買，偏空參考）／由上往下穿越30（超賣，偏多參考）
     - 支撐/壓力突破：今日收盤價突破近N日高點（偏多）或跌破近N日低點（偏空）
+    - 背離：MACD／RSI背離（頂背離偏空參考／底背離偏多參考），比單純指標交叉更有反轉參考價值
 
     每個訊號都會加註是否有「放量確認」：業界常見標準是當日成交量達到
     近5日均量的1.5倍以上，視為放量，訊號可信度較高；沒放量則標示「量能未明顯放大」。
+
+    訊號確認期：MA/KD/MACD這三組交叉訊號，會額外檢查「最近5天內是否已經出現過方向相反的交叉」，
+    如果有，代表這組指標最近訊號來回反覆（常見於盤整格局），會標註「近期訊號反覆，可信度較低」。
+    這類訊號一樣會完整顯示在⚡清單裡，但不會被算進 build_direction_suggestion 的建議分數。
 
     同時用 MA60（季線）判斷「趨勢過濾」：收盤價站上MA60視為多頭環境，跌破視為空頭環境。
     這裡只負責算出趨勢是多是空，實際「逆勢訊號不計入建議分數」的邏輯放在 build_direction_suggestion，
@@ -942,26 +1101,34 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
                 else:
                     volume_note = "，量能未明顯放大"
 
+        CONFIRM_LOOKBACK_DAYS = 5
+
         # 均線交叉
         if all(v is not None for v in [today.get("ma5"), today.get("ma20"), yesterday.get("ma5"), yesterday.get("ma20")]):
             if yesterday["ma5"] <= yesterday["ma20"] and today["ma5"] > today["ma20"]:
-                hits.append(f"MA黃金交叉（買進參考{volume_note}）")
+                whipsaw = "，近期訊號反覆，可信度較低" if _had_recent_opposite_cross(series, "ma5", "ma20", "黃金", CONFIRM_LOOKBACK_DAYS) else ""
+                hits.append(f"MA黃金交叉（買進參考{volume_note}{whipsaw}）")
             elif yesterday["ma5"] >= yesterday["ma20"] and today["ma5"] < today["ma20"]:
-                hits.append(f"MA死亡交叉（賣出參考{volume_note}）")
+                whipsaw = "，近期訊號反覆，可信度較低" if _had_recent_opposite_cross(series, "ma5", "ma20", "死亡", CONFIRM_LOOKBACK_DAYS) else ""
+                hits.append(f"MA死亡交叉（賣出參考{volume_note}{whipsaw}）")
 
         # KD交叉
         if all(v is not None for v in [today.get("k"), today.get("d"), yesterday.get("k"), yesterday.get("d")]):
             if yesterday["k"] <= yesterday["d"] and today["k"] > today["d"]:
-                hits.append(f"KD黃金交叉（買進參考{volume_note}）")
+                whipsaw = "，近期訊號反覆，可信度較低" if _had_recent_opposite_cross(series, "k", "d", "黃金", CONFIRM_LOOKBACK_DAYS) else ""
+                hits.append(f"KD黃金交叉（買進參考{volume_note}{whipsaw}）")
             elif yesterday["k"] >= yesterday["d"] and today["k"] < today["d"]:
-                hits.append(f"KD死亡交叉（賣出參考{volume_note}）")
+                whipsaw = "，近期訊號反覆，可信度較低" if _had_recent_opposite_cross(series, "k", "d", "死亡", CONFIRM_LOOKBACK_DAYS) else ""
+                hits.append(f"KD死亡交叉（賣出參考{volume_note}{whipsaw}）")
 
         # MACD交叉：DIF（快線-慢線）由下往上穿越 DEA（信號線）
         if all(v is not None for v in [today.get("dif"), today.get("dea"), yesterday.get("dif"), yesterday.get("dea")]):
             if yesterday["dif"] <= yesterday["dea"] and today["dif"] > today["dea"]:
-                hits.append(f"MACD黃金交叉（買進參考{volume_note}）")
+                whipsaw = "，近期訊號反覆，可信度較低" if _had_recent_opposite_cross(series, "dif", "dea", "黃金", CONFIRM_LOOKBACK_DAYS) else ""
+                hits.append(f"MACD黃金交叉（買進參考{volume_note}{whipsaw}）")
             elif yesterday["dif"] >= yesterday["dea"] and today["dif"] < today["dea"]:
-                hits.append(f"MACD死亡交叉（賣出參考{volume_note}）")
+                whipsaw = "，近期訊號反覆，可信度較低" if _had_recent_opposite_cross(series, "dif", "dea", "死亡", CONFIRM_LOOKBACK_DAYS) else ""
+                hits.append(f"MACD死亡交叉（賣出參考{volume_note}{whipsaw}）")
 
         # RSI超買超賣：用「今天穿越門檻」的方式偵測（而不是每天只要RSI>70就一直重複提醒）
         RSI_OVERBOUGHT, RSI_OVERSOLD = 70, 30
@@ -981,9 +1148,11 @@ def detect_buy_sell_signals(history: dict, watch_ids: list, breakout_window: int
             elif today["close"] < recent_low:
                 hits.append(f"跌破近{breakout_window}日支撐（偏空參考{volume_note}）")
 
-        # K線型態（錘子/吊人/吞噬/晨星暮星）+ 簡化版雙重頂底
+        # K線型態（錘子/吊人/吞噬/晨星暮星）+ 簡化版雙重頂底 + MACD/RSI背離
         hits.extend(detect_candlestick_patterns(series))
         hits.extend(detect_chart_patterns(series))
+        hits.extend(detect_divergence(series, "rsi", "RSI"))
+        hits.extend(detect_divergence(series, "dif", "MACD"))
 
         if hits:
             signals[stock_id] = hits
@@ -1034,17 +1203,96 @@ def classify_signal_direction(text: str):
     return None
 
 
+def classify_institutional_flow(code: str, inst_df: pd.DataFrame, keyword: str = "外資"):
+    """
+    查詢指定法人（外資／投信／自營商）當日買賣超方向，用來跟技術面訊號做交叉比對。
+    keyword 可以是 "外資"、"投信"、"自營商"。
+    有些法人的欄位在證交所資料裡會拆成好幾個子欄位（例如自營商拆成「自行買賣」「避險」），
+    這裡會把符合關鍵字的「買賣超股數」欄位都加總起來，只用來判斷方向（正/負），不影響判斷結果。
+    回傳 "買超"、"賣超"、或 None（沒有資料、找不到這檔股票、或加總後正好等於0）。
+    """
+    if inst_df is None or inst_df.empty or "證券代號" not in inst_df.columns:
+        return None
+    row_df = inst_df[inst_df["證券代號"].astype(str) == str(code)]
+    if row_df.empty:
+        return None
+    row = row_df.iloc[0]
+
+    total = 0.0
+    found = False
+    for col in inst_df.columns:
+        if keyword in col and "買賣超股數" in col:
+            try:
+                total += float(str(row[col]).replace(",", ""))
+                found = True
+            except (ValueError, TypeError):
+                continue
+    if not found:
+        return None
+    if total > 0:
+        return "買超"
+    elif total < 0:
+        return "賣超"
+    return None
+
+
+def classify_all_institutions_flow(code: str, inst_df: pd.DataFrame) -> dict:
+    """同時查詢外資／投信／自營商三個法人當天的買賣超方向，回傳 {"外資":..., "投信":..., "自營商":...}"""
+    return {
+        "外資": classify_institutional_flow(code, inst_df, "外資"),
+        "投信": classify_institutional_flow(code, inst_df, "投信"),
+        "自營商": classify_institutional_flow(code, inst_df, "自營商"),
+    }
+
+
+def build_cross_check_note(direction: str, flow_by_institution: dict):
+    """
+    把技術面訊號算出來的多空方向，跟外資／投信／自營商三大法人當日買賣超方向做交叉比對。
+    要求「三大法人方向都跟技術面一致」才會標示「資金面支撐」，比只看單一法人更嚴謹保守；
+    只要有任何一個法人方向跟技術面相反，就會提出警示；資料不完整時只列出目前確定知道的部分，
+    不會勉強湊出「三大法人一致」的結論。
+    這是「規則式比對」（多個獨立資料源方向是否一致），不是預測。
+    ※ 僅供參考，不構成投資建議
+    """
+    if direction is None:
+        return None
+
+    target_flow = "買超" if direction == "多" else "賣超"
+    opposite_flow = "賣超" if direction == "多" else "買超"
+
+    known = {k: v for k, v in flow_by_institution.items() if v is not None}
+    if not known:
+        return None
+
+    aligned = [k for k, v in known.items() if v == target_flow]
+    opposed = [k for k, v in known.items() if v == opposite_flow]
+
+    if opposed:
+        return f"⚠️ 交叉比對：{'、'.join(opposed)}{opposite_flow}（與技術面方向不一致，僅供留意）"
+    elif len(aligned) == 3:
+        return f"🔍 交叉比對：三大法人同步{target_flow}（外資／投信／自營商一致），訊號有資金面支撐"
+    elif aligned:
+        return f"🔍 交叉比對：{'、'.join(aligned)}同步{target_flow}（其餘法人資料不足，僅供參考）"
+    return None
+
+
 def build_direction_suggestion(signals: list, trend=None):
     """
     把同一檔股票當天所有技術訊號的方向加總，變成一個簡單的「建議」標籤。
     這是「規則式計分」（多方訊號數 vs 空方訊號數），不是AI生成的分析，
     多空訊號同時出現時如實呈現「訊號不一致」，不會硬湊出一個方向。
-    沒有任何方向性訊號時回傳 None，不會顯示建議。
 
     trend（"多"或"空"，來自MA60趨勢判斷）：如果有提供，「逆勢」訊號不會被計入分數
     （例如目前站上MA60的多頭環境下出現的偏空訊號，計分時會被排除），
     但訊號本身仍完整顯示在⚡清單裡，不會被隱藏——只是不會拿來當作建議依據。
     這是為了避免盤整格局裡逆勢的雜訊訊號誤導整體建議方向。
+
+    同樣的道理，標註「近期訊號反覆，可信度較低」的訊號（訊號確認期判斷出來的）
+    也不會被計入分數，理由一致：這類訊號在盤整格局容易誤導建議方向。
+
+    回傳 (建議文字, 方向)：
+    - 方向是 "多"、"空"、或 None（沒有方向性訊號、或多空打平時為 None，代表無法用來做交叉比對）
+    - 建議文字沒有東西可顯示時為 None
     ※ 僅供參考，不構成投資建議
     """
     bull = 0
@@ -1053,6 +1301,9 @@ def build_direction_suggestion(signals: list, trend=None):
     for s in signals:
         d = classify_signal_direction(s)
         if d is None:
+            continue
+        if "訊號反覆" in s:
+            excluded += 1
             continue
         if trend and d != trend:
             excluded += 1
@@ -1063,27 +1314,27 @@ def build_direction_suggestion(signals: list, trend=None):
             bear += 1
 
     if bull == 0 and bear == 0:
-        return None
+        return None, None
 
     trend_note = ""
     if trend:
         trend_label = "多頭環境（站上MA60）" if trend == "多" else "空頭環境（跌破MA60）"
         trend_note = f"，目前{trend_label}"
-        if excluded:
-            trend_note += f"，{excluded}項逆勢訊號未計入"
+    if excluded:
+        trend_note += f"，{excluded}項逆勢或訊號反覆的項目未計入"
 
     if bull > bear:
-        return f"📈 建議偏多（{bull}項多方訊號 vs {bear}項空方訊號{trend_note}）"
+        return f"📈 建議偏多（{bull}項多方訊號 vs {bear}項空方訊號{trend_note}）", "多"
     elif bear > bull:
-        return f"📉 建議偏空（{bear}項空方訊號 vs {bull}項多方訊號{trend_note}）"
+        return f"📉 建議偏空（{bear}項空方訊號 vs {bull}項多方訊號{trend_note}）", "空"
     else:
-        return f"⚖️ 訊號不一致（多空各{bull}項），建議觀望{trend_note}"
+        return f"⚖️ 訊號不一致（多空各{bull}項），建議觀望{trend_note}", None
 
 
 DIVIDER = "━━━━━━━━━━━━━━"
 
 
-def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=None, trend_by_code=None):
+def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=None, trend_by_code=None, inst_df=None):
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [f"📊 台股每日監控　{today}", DIVIDER]
 
@@ -1099,9 +1350,14 @@ def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=
             short_labels = [shorten_signal_label(sig) for sig in full_signals]
             line += "\n　　⚡ " + "、".join(short_labels)
             trend = (trend_by_code or {}).get(code)
-            suggestion = build_direction_suggestion(full_signals, trend)
+            suggestion, direction = build_direction_suggestion(full_signals, trend)
             if suggestion:
                 line += f"\n　　{suggestion}"
+            if direction:
+                flow_by_institution = classify_all_institutions_flow(code, inst_df)
+                cross_note = build_cross_check_note(direction, flow_by_institution)
+                if cross_note:
+                    line += f"\n　　{cross_note}"
         lines.append(line)
 
     lookup = market_df.set_index(market_df["證券代號"].astype(str))
@@ -1223,7 +1479,7 @@ def main():
         json.dump(buy_sell_signals, f, ensure_ascii=False)
 
     # 6.4 推播（核心自選股 + 使用者額外關注的股票，都會被推播提醒，含買賣訊號）
-    message = format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals, trend_by_code)
+    message = format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals, trend_by_code, inst_df)
     print(message)
     push_message(message)
 
@@ -1541,3 +1797,4 @@ if __name__ == "__main__":
         intraday_main()
     else:
         main()
+
