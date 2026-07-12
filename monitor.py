@@ -24,7 +24,7 @@ from datetime import datetime
 # 注意：5309(系統電)是上櫃股票(TPEx)，目前資料源只抓上市(TWSE)，暫時不會有資料
 CORE_WATCHLIST = [
     "2330", "2317", "2454", "0050",
-    "5309",  # 系統電（上櫃，暫無資料，等之後串接TPEx資料源）
+    "5309",  # 系統電（上櫃）
     "2421",  # 建準
     "2486",  # 一詮
     "2399",  # 映泰
@@ -34,7 +34,12 @@ CORE_WATCHLIST = [
     "3653",  # 健策
     "8210",  # 勤誠
     "6691",  # 洋基工程
-    "5347",  # 世界先進（上櫃，暫無資料，等之後串接TPEx資料源）
+    "5347",  # 世界先進（上櫃）
+    "6719",  # 力智
+    "3711",  # 日月光投控
+    "2344",  # 華邦電
+    "2059",  # 川湖
+    "6139",  # 亞翔
 ]
 
 # 推播訊息裡，每個動態分類最多顯示幾檔（避免訊息太長），網頁則會顯示完整的 DYNAMIC_LIMIT_PER_CATEGORY 檔數
@@ -99,6 +104,77 @@ GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")  # 格式："帳號/
 # ============================================================
 # 1. 資料源層：抓取「全市場」當日資料（一次打包，不用逐檔查）
 # ============================================================
+
+def fetch_otc_market_daily():
+    """
+    抓取上櫃全部個股當日成交資訊（櫃買中心 TPEx OpenAPI，免費，無需金鑰）。
+    回傳 DataFrame，欄位跟 fetch_all_market_daily() 對齊：證券代號、證券名稱、開盤價、
+    最高價、最低價、收盤價、漲跌價差、成交股數，這樣兩份資料可以直接合併使用。
+
+    ⚠️ 櫃買中心這個端點的資料結構跟證交所很不一樣：不是單純一份列表，
+    而是把好幾種統計資料包在同一份回應裡（data1~data9 這種區塊），
+    個股的收盤行情藏在其中一個區塊（通常是最後一個），且必須帶「民國年日期」參數，
+    不像證交所那樣不帶日期就自動給今天最新資料。
+    這裡用「欄位名稱關鍵字比對」而不是寫死欄位順序，比較能適應櫃買中心調整過格式的情況；
+    如果真的抓不到，會印出實際收到的欄位讓人可以直接對照修正，不會讓程式掛掉。
+    """
+    empty = pd.DataFrame(columns=["證券代號", "證券名稱", "開盤價", "最高價", "最低價", "收盤價", "漲跌價差", "成交股數"])
+
+    now = datetime.now()
+    roc_date = f"{now.year - 1911}/{now.month:02d}/{now.day:02d}"
+    url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+    params = {"l": "zh-tw", "d": roc_date}
+
+    try:
+        resp = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"抓取上櫃股票資料失敗，略過本次上櫃更新：{e}")
+        return empty
+
+    # 找出「個股收盤行情」那個資料區塊：掃過 data1~data9，找欄位名稱裡同時有「代號」跟「收盤」的那一塊
+    rows, fields = None, None
+    for i in range(1, 10):
+        block_fields = data.get(f"fields{i}")
+        block_data = data.get(f"data{i}")
+        if not block_fields or not block_data:
+            continue
+        field_text = "".join(block_fields)
+        if "代號" in field_text and "收盤" in field_text:
+            rows, fields = block_data, block_fields
+            break
+
+    if rows is None:
+        print(f"上櫃股票資料抓不到對應的收盤行情區塊，回應裡的區塊：{[k for k in data.keys() if k.startswith('fields')]}，略過本次上櫃更新")
+        return empty
+
+    try:
+        df = pd.DataFrame(rows, columns=fields)
+    except Exception as e:
+        print(f"上櫃股票資料欄位對不上（{e}），略過本次上櫃更新")
+        return empty
+
+    def find_col(keyword):
+        return next((c for c in df.columns if keyword in c), None)
+
+    col_map = {
+        "證券代號": find_col("代號"), "證券名稱": find_col("名稱"),
+        "開盤價": find_col("開盤"), "最高價": find_col("最高"), "最低價": find_col("最低"),
+        "收盤價": find_col("收盤"), "漲跌價差": find_col("漲跌"), "成交股數": find_col("成交股數"),
+    }
+    missing = [k for k, v in col_map.items() if v is None]
+    if missing:
+        print(f"上櫃股票資料缺少欄位：{missing}，實際欄位：{list(df.columns)}，略過本次上櫃更新")
+        return empty
+
+    out = pd.DataFrame({new: df[old] for new, old in col_map.items()})
+    out["證券代號"] = out["證券代號"].astype(str).str.strip()
+    numeric_cols = ["開盤價", "最高價", "最低價", "收盤價", "漲跌價差", "成交股數"]
+    for col in numeric_cols:
+        out[col] = pd.to_numeric(out[col].astype(str).str.replace(",", ""), errors="coerce")
+    return out
+
 
 def fetch_all_market_daily():
     """
@@ -1456,6 +1532,12 @@ def main():
     # 6.2 抓取市場資料
     market_df = fetch_all_market_daily()
     try:
+        otc_df = fetch_otc_market_daily()
+        if not otc_df.empty:
+            market_df = pd.concat([market_df, otc_df], ignore_index=True)
+    except Exception as e:
+        print(f"合併上櫃股票資料失敗，本次僅使用上市股票資料：{e}")
+    try:
         inst_df = fetch_institutional_investors()
     except Exception:
         inst_df = pd.DataFrame()
@@ -1797,4 +1879,5 @@ if __name__ == "__main__":
         intraday_main()
     else:
         main()
+
 
