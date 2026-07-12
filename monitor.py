@@ -1321,6 +1321,37 @@ def classify_all_institutions_flow(code: str, inst_df: pd.DataFrame) -> dict:
     }
 
 
+def get_market_trend(history: dict):
+    """
+    用大盤指數（TAIEX）的收盤價 vs MA60，判斷目前整體大盤是多頭還是空頭環境。
+    回傳 "多"、"空"、或 None（大盤歷史資料不足時，例如剛串接還沒累積夠60天）。
+    """
+    series = history.get(TAIEX_ID, [])
+    if not series:
+        return None
+    today = series[-1]
+    if today.get("ma60") is None:
+        return None
+    return "多" if today["close"] >= today["ma60"] else "空"
+
+
+def build_market_alignment_note(direction: str, market_trend: str):
+    """
+    把個股技術面算出來的建議方向，跟大盤（加權指數）目前的多空環境做交叉比對。
+    個股訊號跟大盤同方向時，代表這檔股票的走勢跟大環境一致，參考價值較高；
+    個股訊號跟大盤方向相反時（例如大盤空頭但這檔股票逆勢出現多方訊號），
+    不代表訊號是錯的，但屬於「逆勢個股」，波動風險可能較高，值得多留意，不是要你避開。
+    ※ 僅供參考，不構成投資建議
+    """
+    if direction is None or market_trend is None:
+        return None
+    label = "多頭" if market_trend == "多" else "空頭"
+    if direction == market_trend:
+        return f"📊 大盤同步：目前大盤也是{label}環境，訊號跟大環境一致"
+    else:
+        return f"⚠️ 大盤逆勢：大盤目前是{label}環境，這檔個股訊號跟大環境不同，波動風險可能較高"
+
+
 def build_cross_check_note(direction: str, flow_by_institution: dict):
     """
     把技術面訊號算出來的多空方向，跟外資／投信／自營商三大法人當日買賣超方向做交叉比對。
@@ -1410,7 +1441,7 @@ def build_direction_suggestion(signals: list, trend=None):
 DIVIDER = "━━━━━━━━━━━━━━"
 
 
-def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=None, trend_by_code=None, inst_df=None):
+def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=None, trend_by_code=None, inst_df=None, market_trend=None):
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [f"📊 台股每日監控　{today}", DIVIDER]
 
@@ -1434,6 +1465,9 @@ def format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals=
                 cross_note = build_cross_check_note(direction, flow_by_institution)
                 if cross_note:
                     line += f"\n　　{cross_note}"
+                market_note = build_market_alignment_note(direction, market_trend)
+                if market_note:
+                    line += f"\n　　{market_note}"
         lines.append(line)
 
     lookup = market_df.set_index(market_df["證券代號"].astype(str))
@@ -1561,7 +1595,8 @@ def main():
         json.dump(buy_sell_signals, f, ensure_ascii=False)
 
     # 6.4 推播（核心自選股 + 使用者額外關注的股票，都會被推播提醒，含買賣訊號）
-    message = format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals, trend_by_code, inst_df)
+    market_trend = get_market_trend(history)
+    message = format_message(core_signals, dynamic_watchlist, market_df, buy_sell_signals, trend_by_code, inst_df, market_trend)
     print(message)
     push_message(message)
 
@@ -1879,5 +1914,3 @@ if __name__ == "__main__":
         intraday_main()
     else:
         main()
-
-
