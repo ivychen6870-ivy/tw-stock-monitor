@@ -25,6 +25,7 @@ FinMind API 文件：https://finmind.github.io/
 """
 
 import sys
+from datetime import datetime
 import requests
 import pandas as pd
 
@@ -65,17 +66,23 @@ def fetch_price_data(stock_id: str, start_date: str, end_date: str = None,
         造成的價格跳空誤判成假的交叉訊號。技術分析用途建議一律用還原股價。
     adjusted=False：用原始股價（TaiwanStockPrice），沒有做除權息還原。
 
+    【重要】TaiwanStockPriceAdj 必須同時帶 start_date 和 end_date 才能正常查詢，
+    只帶 start_date 會被拒絕（400錯誤，已實測確認）。這裡固定會補上 end_date
+    （沒指定就預設是今天），呼叫端不用自己處理。
+
+    【重要】指數（例如加權指數 data_id="001"）沒有除權息的概念，
+    TaiwanStockPriceAdj 不支援指數代號，查指數時請把 adjusted 設成 False，
+    改用一般的 TaiwanStockPrice。
+
     回傳 index 為日期、欄位為 open/high/low/close/volume 的 DataFrame，
     格式直接對應 tw_stock_indicators.py 的輸入需求。
 
     注意：興櫃個股的 open 欄位是「前日均價」而非當日開盤價（FinMind 官方文件說明），
     可能出現 open 落在當日高低點之外的情形，非資料錯誤，使用上市櫃股票不受影響。
-
-    【待驗證】TaiwanStockPriceAdj 的欄位名稱是否跟 TaiwanStockPrice 完全一致
-    （open/max/min/close/Trading_Volume）沒有在這裡實際連線驗證過，
-    請在 GitHub Actions 上第一次呼叫時確認一下欄位對不對得起來，
-    如果欄位名稱不同，把錯誤訊息貼給我，我再調整。
     """
+    if end_date is None:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+
     dataset = "TaiwanStockPriceAdj" if adjusted else "TaiwanStockPrice"
     df = _finmind_request(dataset, stock_id, start_date, end_date, token)
 
@@ -92,6 +99,16 @@ def fetch_price_data(stock_id: str, start_date: str, end_date: str = None,
     df = df.set_index("date").sort_index()
 
     return df[["open", "high", "low", "close", "volume"]]
+
+
+def fetch_index_price(data_id: str, start_date: str, end_date: str = None,
+                       token: str = "") -> pd.DataFrame:
+    """
+    抓取指數（例如加權指數 data_id="001"）的每日OHLC，一律用未還原股價
+    （TaiwanStockPriceAdj 不支援指數代號，指數本身也沒有除權息還原的概念）。
+    格式跟 fetch_price_data() 一致。
+    """
+    return fetch_price_data(data_id, start_date, end_date, token, adjusted=False)
 
 
 def fetch_institutional_investors(stock_id: str, start_date: str, end_date: str = None,
