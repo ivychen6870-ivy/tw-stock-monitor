@@ -34,7 +34,8 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from fetch_tw_stock_data import fetch_price_data, fetch_futures_daily, fetch_index_price
+from fetch_tw_stock_data import fetch_futures_daily
+from fetch_tw_price_native import fetch_stock_price_range_adjusted, fetch_index_price_range
 from tw_stock_indicators import generate_signals, calculate_price_levels, backtest_signal_returns
 
 # ============================================================
@@ -61,7 +62,6 @@ CORE_WATCHLIST = [
     "6139",  # 亞翔
 ]
 
-TAIEX_DATA_ID = "001"  # FinMind的加權指數代號（3碼指數代號，不是股票代號）
 FUTURES_ID = "TX"
 
 DATA_DIR = "docs/data"
@@ -264,7 +264,7 @@ def main():
     # --- 大盤指數 ---
     try:
         df = get_symbol_dataframe(history, "TAIEX",
-                                   lambda sd: fetch_index_price(TAIEX_DATA_ID, sd, token=FINMIND_TOKEN))
+                                   lambda sd: fetch_index_price_range(sd))
         all_results["TAIEX"] = analyze_symbol("加權指數", df)
     except Exception as e:
         print(f"大盤指數抓取/分析失敗，略過：{e}")
@@ -290,7 +290,7 @@ def main():
     for stock_id in CORE_WATCHLIST:
         try:
             df = get_symbol_dataframe(history, stock_id,
-                                       lambda sd, sid=stock_id: fetch_price_data(sid, sd, token=FINMIND_TOKEN))
+                                       lambda sd, sid=stock_id: fetch_stock_price_range_adjusted(sid, sd))
             entry = analyze_symbol(stock_id, df)
             all_results[stock_id] = entry
             if entry["decision"] == "買進":
