@@ -34,7 +34,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from fetch_tw_stock_data import fetch_price_data, fetch_futures_daily
+from fetch_tw_stock_data import fetch_price_data, fetch_futures_daily, fetch_index_price
 from tw_stock_indicators import generate_signals, calculate_price_levels, backtest_signal_returns
 
 # ============================================================
@@ -264,7 +264,7 @@ def main():
     # --- 大盤指數 ---
     try:
         df = get_symbol_dataframe(history, "TAIEX",
-                                   lambda sd: fetch_price_data(TAIEX_DATA_ID, sd, token=FINMIND_TOKEN))
+                                   lambda sd: fetch_index_price(TAIEX_DATA_ID, sd, token=FINMIND_TOKEN))
         all_results["TAIEX"] = analyze_symbol("加權指數", df)
     except Exception as e:
         print(f"大盤指數抓取/分析失敗，略過：{e}")
