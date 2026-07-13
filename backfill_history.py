@@ -27,7 +27,7 @@ import os
 import time
 from datetime import datetime, timedelta
 
-from fetch_tw_stock_data import fetch_price_data, fetch_futures_daily
+from fetch_tw_stock_data import fetch_price_data, fetch_futures_daily, fetch_index_price
 from monitor import (
     CORE_WATCHLIST, TAIEX_DATA_ID, FUTURES_ID, DATA_DIR, HISTORY_FILE_NAME,
     FINMIND_TOKEN, BACKFILL_LOOKBACK_DAYS, MAX_HISTORY_RECORDS,
@@ -53,7 +53,7 @@ def main():
     history = load_history()
 
     backfill_one(history, "TAIEX", "加權指數",
-                 lambda sd: fetch_price_data(TAIEX_DATA_ID, sd, token=FINMIND_TOKEN), start_date)
+                 lambda sd: fetch_index_price(TAIEX_DATA_ID, sd, token=FINMIND_TOKEN), start_date)
 
     backfill_one(history, "TX_day", "台指期(日盤)",
                  lambda sd: fetch_futures_daily(FUTURES_ID, sd, token=FINMIND_TOKEN, session="day"), start_date)
