@@ -43,8 +43,8 @@
     background:var(--card); border-bottom:1px solid var(--border);
     position:sticky; top:0; z-index:30;
   }
-  .topbar .title{ font-size:17px; font-weight:700; }
-  .topbar .date{ font-size:12px; color:var(--text-2); }
+  .topbar .title{ font-size:19.5px; font-weight:700; }
+  .topbar .date{ font-size:14px; color:var(--text-2); }
 
   /* ---------- Tab 內容區 ---------- */
   .tab-panel{ display:none; }
@@ -55,8 +55,8 @@
     display:flex; justify-content:space-between; align-items:baseline;
     margin-bottom:10px;
   }
-  .section-head h2{ font-size:14px; font-weight:700; }
-  .section-head .link{ font-size:12px; color:var(--brand); font-weight:600; }
+  .section-head h2{ font-size:16px; font-weight:700; }
+  .section-head .link{ font-size:14px; color:var(--brand); font-weight:600; }
 
   /* ---------- 大盤指數卡 ---------- */
   .index-row{ display:flex; gap:10px; }
@@ -64,13 +64,13 @@
     flex:1; width:100%; background:var(--card); border:1px solid var(--border); border-radius:10px;
     padding:12px 14px;
   }
-  .index-card .idx-name{ font-size:12px; color:var(--text-1); margin-bottom:4px; }
-  .index-card .idx-value{ font-size:20px; font-weight:700; margin-bottom:2px; }
-  .index-card .idx-change{ font-size:12px; font-weight:600; }
+  .index-card .idx-name{ font-size:14px; color:var(--text-1); margin-bottom:4px; }
+  .index-card .idx-value{ font-size:23px; font-weight:700; margin-bottom:2px; }
+  .index-card .idx-change{ font-size:14px; font-weight:600; }
   .index-card .idx-change.up{ color:var(--up); }
   .index-card .idx-change.down{ color:var(--down); }
   svg.spark-mini{ width:100%; height:32px; display:block; margin-top:6px; }
-  .basis-row{ font-size:11.5px; color:var(--text-1); margin-top:8px; text-align:center; }
+  .basis-row{ font-size:13px; color:var(--text-1); margin-top:8px; text-align:center; }
   .basis-row .b-up{ color:var(--up); font-weight:600; }
   .basis-row .b-down{ color:var(--down); font-weight:600; }
 
@@ -80,11 +80,11 @@
     flex:1; background:var(--card); border:1px solid var(--border); border-radius:10px;
     padding:10px; text-align:center;
   }
-  .stat-chip .n{ font-size:18px; font-weight:700; }
+  .stat-chip .n{ font-size:20.5px; font-weight:700; }
   .stat-chip .n.up{ color:var(--up); }
   .stat-chip .n.down{ color:var(--down); }
   .stat-chip .n.neutral{ color:var(--neutral); }
-  .stat-chip .lbl{ font-size:11px; color:var(--text-2); margin-top:2px; }
+  .stat-chip .lbl{ font-size:12.5px; color:var(--text-2); margin-top:2px; }
 
   /* ---------- 清單列（自選股／推薦） ---------- */
   .list-card{ background:var(--card); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
@@ -95,23 +95,23 @@
   .stock-row:last-child{ border-bottom:none; }
   .stock-row:active{ background:var(--bg); }
   .row-left{ display:flex; flex-direction:column; gap:2px; min-width:0; }
-  .row-name{ font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .row-id{ font-size:11px; color:var(--text-2); }
-  .row-reason{ font-size:11px; color:var(--text-2); margin-top:1px; }
+  .row-name{ font-size:16px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row-id{ font-size:12.5px; color:var(--text-2); }
+  .row-reason{ font-size:12.5px; color:var(--text-2); margin-top:1px; }
   .row-right{ display:flex; align-items:center; gap:10px; flex-shrink:0; }
   .row-price{ text-align:right; }
-  .row-price .p{ font-size:14.5px; font-weight:700; }
-  .row-price .c{ font-size:11.5px; font-weight:600; margin-top:1px; white-space:nowrap; }
+  .row-price .p{ font-size:16.5px; font-weight:700; }
+  .row-price .c{ font-size:13px; font-weight:600; margin-top:1px; white-space:nowrap; }
   .row-price .c.up{ color:var(--up); }
   .row-price .c.down{ color:var(--down); }
   .row-price .c.neutral{ color:var(--text-2); }
   .tag{
-    font-size:11px; font-weight:700; padding:4px 8px; border-radius:6px; flex-shrink:0; min-width:40px; text-align:center;
+    font-size:12.5px; font-weight:700; padding:4px 8px; border-radius:6px; flex-shrink:0; min-width:40px; text-align:center;
   }
   .tag.up{ color:var(--up); background:var(--up-bg); }
   .tag.down{ color:var(--down); background:var(--down-bg); }
   .tag.neutral{ color:var(--neutral); background:var(--neutral-bg); }
-  .score-mini{ font-size:12px; font-weight:700; min-width:34px; text-align:left; flex-shrink:0; }
+  .score-mini{ font-size:14px; font-weight:700; min-width:34px; text-align:left; flex-shrink:0; }
   .score-mini.up{ color:var(--up); }
   .score-mini.down{ color:var(--down); }
   .score-mini.neutral{ color:var(--text-2); }
@@ -119,7 +119,7 @@
   /* ---------- 自選股：排序控制 ---------- */
   .sort-bar{ display:flex; gap:8px; margin-bottom:10px; overflow-x:auto; }
   .sort-btn{
-    font-size:12px; padding:6px 12px; border-radius:16px; border:1px solid var(--border);
+    font-size:14px; padding:6px 12px; border-radius:16px; border:1px solid var(--border);
     color:var(--text-1); background:var(--card); white-space:nowrap; flex-shrink:0;
   }
   .sort-btn.active{ background:var(--brand); border-color:var(--brand); color:#fff; font-weight:600; }
@@ -136,43 +136,43 @@
     background:var(--card); border-bottom:1px solid var(--border);
     position:sticky; top:0;
   }
-  .back-btn{ font-size:20px; color:var(--text-0); padding:2px 6px 2px 0; }
-  .detail-topbar .dt-name{ font-size:15px; font-weight:700; }
-  .detail-topbar .dt-id{ font-size:11px; color:var(--text-2); }
+  .back-btn{ font-size:23px; color:var(--text-0); padding:2px 6px 2px 0; }
+  .detail-topbar .dt-name{ font-size:17px; font-weight:700; }
+  .detail-topbar .dt-id{ font-size:12.5px; color:var(--text-2); }
 
   .session-toggle{ display:flex; gap:8px; padding:12px 16px; background:var(--card); border-bottom:8px solid var(--bg); }
-  .session-btn{ flex:1; text-align:center; font-size:13px; font-weight:600; padding:9px 0; border-radius:8px; color:var(--text-1); background:var(--bg); }
+  .session-btn{ flex:1; text-align:center; font-size:15px; font-weight:600; padding:9px 0; border-radius:8px; color:var(--text-1); background:var(--bg); }
   .session-btn.active{ background:var(--brand); color:#fff; }
 
   .quote-block{ background:var(--card); padding:20px 16px; border-bottom:8px solid var(--bg); }
-  .quote-price{ font-size:34px; font-weight:800; margin-bottom:4px; }
-  .quote-change{ font-size:14px; font-weight:600; }
+  .quote-price{ font-size:39px; font-weight:800; margin-bottom:4px; }
+  .quote-change{ font-size:16px; font-weight:600; }
   .quote-change.up{ color:var(--up); }
   .quote-change.down{ color:var(--down); }
   .quote-change.neutral{ color:var(--text-2); }
   svg.kline-chart{ width:100%; height:220px; display:block; margin-top:16px; }
   .kline-legend{ display:flex; flex-wrap:wrap; gap:10px 14px; margin-top:10px; }
-  .kline-legend .lg-item{ display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--text-1); }
+  .kline-legend .lg-item{ display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text-1); }
   .kline-legend .lg-dot{ width:9px; height:2.5px; border-radius:2px; }
 
   .decision-block{
     background:var(--card); padding:18px 16px; border-bottom:8px solid var(--bg);
     display:flex; align-items:center; justify-content:space-between;
   }
-  .decision-block .db-left .db-label{ font-size:11px; color:var(--text-2); margin-bottom:4px; }
-  .decision-block .db-left .db-value{ font-size:22px; font-weight:800; }
+  .decision-block .db-left .db-label{ font-size:12.5px; color:var(--text-2); margin-bottom:4px; }
+  .decision-block .db-left .db-value{ font-size:25.5px; font-weight:800; }
   .decision-block .db-left .db-value.up{ color:var(--up); }
   .decision-block .db-left .db-value.down{ color:var(--down); }
   .decision-block .db-left .db-value.neutral{ color:var(--neutral); }
   .decision-block .db-right{ text-align:right; }
-  .decision-block .db-right .score{ font-size:20px; font-weight:700; }
-  .decision-block .db-right .score-lbl{ font-size:11px; color:var(--text-2); }
+  .decision-block .db-right .score{ font-size:23px; font-weight:700; }
+  .decision-block .db-right .score-lbl{ font-size:12.5px; color:var(--text-2); }
 
   .indicator-block{ background:var(--card); padding:16px; border-bottom:8px solid var(--bg); }
-  .indicator-block h3{ font-size:13px; font-weight:700; margin-bottom:12px; }
+  .indicator-block h3{ font-size:15px; font-weight:700; margin-bottom:12px; }
 
   .levels-block{ background:var(--card); padding:16px; border-bottom:8px solid var(--bg); }
-  .levels-block h3{ font-size:13px; font-weight:700; margin-bottom:12px; }
+  .levels-block h3{ font-size:15px; font-weight:700; margin-bottom:12px; }
   .level-grid{ display:flex; flex-direction:column; gap:0; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
   .level-item{
     display:flex; justify-content:space-between; align-items:center;
@@ -180,22 +180,22 @@
   }
   .level-item:last-child{ border-bottom:none; }
   .level-item.entry{ background:var(--brand-tint); }
-  .level-lbl{ font-size:12.5px; color:var(--text-1); }
-  .level-val{ font-size:15px; font-weight:700; }
+  .level-lbl{ font-size:14.5px; color:var(--text-1); }
+  .level-val{ font-size:17px; font-weight:700; }
   .level-val.up{ color:var(--up); }
   .level-val.down{ color:var(--down); }
-  .level-note{ font-size:10.5px; color:var(--text-2); margin-top:10px; line-height:1.5; }
+  .level-note{ font-size:12px; color:var(--text-2); margin-top:10px; line-height:1.5; }
 
   .backtest-block{ background:var(--card); padding:16px; border-bottom:8px solid var(--bg); }
-  .backtest-block h3{ font-size:13px; font-weight:700; margin-bottom:12px; }
+  .backtest-block h3{ font-size:15px; font-weight:700; margin-bottom:12px; }
   .bt-cols{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .bt-col{ border:1px solid var(--border); border-radius:10px; padding:12px; }
-  .bt-col-title{ font-size:11px; color:var(--text-2); font-weight:700; margin-bottom:8px; }
-  .bt-row{ display:flex; justify-content:space-between; font-size:12px; padding:4px 0; color:var(--text-1); }
+  .bt-col-title{ font-size:12.5px; color:var(--text-2); font-weight:700; margin-bottom:8px; }
+  .bt-row{ display:flex; justify-content:space-between; font-size:14px; padding:4px 0; color:var(--text-1); }
   .bt-row span:last-child{ font-weight:700; color:var(--text-0); }
-  .bt-note{ font-size:11px; color:var(--text-2); margin-top:10px; }
+  .bt-note{ font-size:12.5px; color:var(--text-2); margin-top:10px; }
   .indicator-grid{ display:grid; grid-template-columns:repeat(2, 1fr); gap:10px 14px; }
-  .ind-item{ display:flex; justify-content:space-between; align-items:center; font-size:13px; }
+  .ind-item{ display:flex; justify-content:space-between; align-items:center; font-size:15px; }
   .ind-item .ind-name{ color:var(--text-1); }
   .ind-item .ind-val{ font-weight:700; }
   .ind-item .ind-val.up{ color:var(--up); }
@@ -203,20 +203,20 @@
   .ind-item .ind-val.neutral{ color:var(--text-2); }
 
   .pattern-block{ background:var(--card); padding:16px; border-bottom:8px solid var(--bg); }
-  .pattern-block h3{ font-size:13px; font-weight:700; margin-bottom:10px; }
+  .pattern-block h3{ font-size:15px; font-weight:700; margin-bottom:10px; }
   .pattern-badges{ display:flex; flex-wrap:wrap; gap:8px; }
-  .pbadge{ font-size:12px; padding:6px 12px; border-radius:6px; font-weight:600; }
+  .pbadge{ font-size:14px; padding:6px 12px; border-radius:6px; font-weight:600; }
   .pbadge.up{ color:var(--up); background:var(--up-bg); }
   .pbadge.down{ color:var(--down); background:var(--down-bg); }
   .pbadge.info{ color:var(--text-1); background:var(--bg); }
 
   .summary-block{ background:var(--card); padding:16px; }
-  .summary-block h3{ font-size:13px; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:8px; }
-  .ai-tag{ font-size:10px; font-weight:700; color:var(--brand); background:var(--brand-tint); padding:2px 7px; border-radius:4px; }
+  .summary-block h3{ font-size:15px; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:8px; }
+  .ai-tag{ font-size:11.5px; font-weight:700; color:var(--brand); background:var(--brand-tint); padding:2px 7px; border-radius:4px; }
   .summary-block ul{ list-style:none; margin-top:10px; display:flex; flex-direction:column; gap:8px; }
-  .summary-block li{ font-size:13px; line-height:1.6; color:var(--text-1); padding-left:14px; position:relative; }
+  .summary-block li{ font-size:15px; line-height:1.6; color:var(--text-1); padding-left:14px; position:relative; }
   .summary-block li::before{ content:"•"; position:absolute; left:0; color:var(--text-2); }
-  .summary-meta{ margin-top:12px; font-size:11px; color:var(--text-2); }
+  .summary-meta{ margin-top:12px; font-size:12.5px; color:var(--text-2); }
 
   /* ---------- 底部導覽列 ---------- */
   .bottom-nav{
@@ -228,11 +228,11 @@
     flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
     padding:9px 0 8px 0; color:var(--text-2);
   }
-  .nav-btn .icon{ font-size:19px; line-height:1; }
-  .nav-btn .lbl{ font-size:10.5px; }
+  .nav-btn .icon{ font-size:22px; line-height:1; }
+  .nav-btn .lbl{ font-size:12px; }
   .nav-btn.active{ color:var(--brand); font-weight:700; }
 
-  footer{ padding:16px; text-align:center; font-size:10.5px; color:var(--text-2); }
+  footer{ padding:16px; text-align:center; font-size:12px; color:var(--text-2); }
 
   .stock-row:focus-visible, .sort-btn:focus-visible, .nav-btn:focus-visible{
     outline:2px solid var(--brand); outline-offset:-2px;
@@ -582,6 +582,8 @@ function mapEntry(entry){
     ohlc: entry.ohlc_history || [],
     levels: entry.levels || null,
     backtest: entry.backtest || null,
+    isIntraday: entry.is_intraday || false,
+    intradayTime: entry.intraday_time || "",
   };
 }
 
@@ -708,8 +710,8 @@ function renderWatchlist(){
 
 /* ---------- 個股詳情 ---------- */
 function renderDetailData(data){
-  document.getElementById("dtName").textContent = data.name;
-  document.getElementById("dtId").textContent = data.market;
+  document.getElementById("dtName").textContent = data.name + (data.isIntraday ? "　⏱盤中暫定" : "");
+  document.getElementById("dtId").textContent = data.market + (data.isIntraday ? `（${data.intradayTime} 更新）` : "");
   document.getElementById("dtPrice").textContent = data.price.toLocaleString();
 
   const up = data.priceChange >= 0;
