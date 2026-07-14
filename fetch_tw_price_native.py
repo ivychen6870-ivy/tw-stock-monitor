@@ -318,17 +318,33 @@ def fetch_stock_price_range_adjusted(stock_id: str, start_date: str, end_date: s
 # 大盤指數（發行量加權股價指數）
 # ============================================================
 
-def fetch_index_month_ohlc(year: int, month: int) -> list:
-    """抓取大盤指數某個月份的完整每日OHLC（證交所 MI_5MINS_HIST）"""
+def fetch_index_month_ohlc(year: int, month: int, max_retries: int = 3) -> list:
+    """
+    抓取大盤指數某個月份的完整每日OHLC（證交所 MI_5MINS_HIST）。
+    這個端點沒有備援來源（FinMind免費資料集沒有完全對等的加權指數OHLC），
+    失敗時改用重試機制：失敗通常是暫時性的（網路波動、對方短暫限流），
+    重試幾次通常就會成功；如果重試後還是失敗，才真的放棄這個月份。
+    """
     date_str = f"{year}{month:02d}01"
     url = "https://www.twse.com.tw/indicesReport/MI_5MINS_HIST"
     params = {"response": "json", "date": date_str}
-    try:
-        resp = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        print(f"  大盤指數 {year}-{month:02d} 抓取失敗：{e}")
+
+    data = None
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                print(f"  大盤指數 {year}-{month:02d} 第{attempt}次抓取失敗，{2*attempt}秒後重試：{e}")
+                time.sleep(2 * attempt)
+
+    if data is None:
+        print(f"  大盤指數 {year}-{month:02d} 重試{max_retries}次後仍失敗，放棄這個月份：{last_error}")
         return []
 
     rows_raw = data.get("data", [])
