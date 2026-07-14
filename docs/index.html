@@ -246,6 +246,7 @@
     <span class="title">台股訊號</span>
     <span class="date" id="dateNow">--</span>
   </div>
+  <div id="loadError" style="display:none; padding:10px 16px; background:#FCEBEA; color:#B3261E; font-size:12px; line-height:1.5;"></div>
 
   <!-- ============ 首頁 ============ -->
   <div class="tab-panel active" id="tab-home">
@@ -547,131 +548,73 @@ function drawCandlestick(svgId, ohlc, displayCount=80){
   }
 }
 
-const RAW_WATCHLIST = [
-  { id:"2330", name:"台灣積體電路", price:1085, score:9.5,  reason:"MA黃金交叉+多頭吞噬" },
-  { id:"2317", name:"鴻海",         price:203,  score:6,    reason:"KD黃金交叉" },
-  { id:"2454", name:"聯發科",       price:1350, score:-2,   reason:"MA60轉弱" },
-  { id:"2308", name:"台達電",       price:412,  score:8.5,  reason:"突破20日壓力，量增確認" },
-  { id:"2382", name:"廣達",         price:298,  score:3,    reason:"RSI中性" },
-  { id:"3711", name:"日月光投控",   price:168,  score:-9,   reason:"MA死亡交叉+頂背離" },
-  { id:"2412", name:"中華電",       price:127,  score:1,    reason:"盤整區間" },
-  { id:"2881", name:"富邦金",       price:92,   score:-1,   reason:"BIAS轉負" },
-  { id:"2882", name:"國泰金",       price:58,   score:0.5,  reason:"訊號中性" },
-  { id:"1301", name:"台塑",         price:52,   score:-6,   reason:"跌破MA60" },
-  { id:"1303", name:"南亞",         price:49,   score:-8.5, reason:"KD死亡交叉(高檔)" },
-  { id:"2891", name:"中信金",       price:41,   score:2,    reason:"訊號中性偏多" },
-  { id:"2886", name:"兆豐金",       price:39,   score:4,    reason:"MACD翻正" },
-  { id:"2884", name:"玉山金",       price:28,   score:-3,   reason:"洗盤警示" },
-  { id:"2603", name:"長榮",         price:186,  score:10.5, reason:"晨星型態+突破壓力" },
-  { id:"2609", name:"陽明",         price:92,   score:7,    reason:"ADX趨勢確立(偏多)" },
-  { id:"3008", name:"大立光",       price:2350, score:-2.5, reason:"RSI轉弱" },
-  { id:"2379", name:"瑞昱",         price:452,  score:5,    reason:"布林中軌附近" },
-  { id:"6505", name:"台塑化",       price:73,   score:-10,  reason:"空頭吞噬+跌破支撐" },
-  { id:"2892", name:"第一金",       price:26,   score:1.5,  reason:"訊號中性" },
-];
-
 const BUY_TH = 8, SELL_TH = -8;
 function decisionOf(score){ return score >= BUY_TH ? "買進" : score <= SELL_TH ? "賣出" : "觀望"; }
 function decisionClass(d){ return d === "買進" ? "up" : d === "賣出" ? "down" : "neutral"; }
 
-const WATCHLIST = RAW_WATCHLIST.map((s, i) => {
-  const decision = decisionOf(s.score);
-  const bias = s.score / 5;
-  return {
-    ...s,
-    market: s.id + ".TW",
-    decision,
-    maxScore: 15,
-    changePct: Math.round(bias*0.8*100)/100,
-    priceChange: Math.round(s.price * bias * 0.008 * 10)/10,
-    sparkline: genSpark(i+1, bias, 10, 100),
-    ohlc: genOHLC(i+1, bias, 300, s.price*0.85),
-    indicators: [
-      { name:"MACD", value: s.score>=0?"+1":"-1", dir: s.score>=0?"up":"down" },
-      { name:"RSI", value:"0", dir:"neutral" },
-      { name:"KD", value: s.score>2?"+1":"-1", dir: s.score>2?"up":"down" },
-      { name:"MA60", value: s.score>0?"+1":"-1", dir: s.score>0?"up":"down" },
-      { name:"BIAS", value:"0", dir:"neutral" },
-      { name:"布林通道", value:"0", dir:"neutral" },
-      { name:"DMI/ADX", value: Math.abs(s.score)>7?(s.score>0?"+1":"-1"):"0", dir: Math.abs(s.score)>7?(s.score>0?"up":"down"):"neutral" },
-      { name:"MA交叉", value: s.score>6?"+1":"0", dir: s.score>6?"up":"neutral" },
-      { name:"KD交叉", value: s.score<-6?"-1.5":"0", dir: s.score<-6?"down":"neutral" },
-      { name:"型態訊號", value: Math.abs(s.score)>8?(s.score>0?"+1":"-1"):"0", dir: Math.abs(s.score)>8?(s.score>0?"up":"down"):"neutral" },
-    ],
-    patterns: s.score>=8 ? [{label:s.reason, type:"up"}, {label:"ADX 趨勢確立", type:"info"}]
-             : s.score<=-8 ? [{label:s.reason, type:"down"}]
-             : [{label:"今日無特殊型態訊號", type:"info"}],
-    summary: [ `技術面重點：${s.reason}`, "新聞與財報摘要：待串接 AI 摘要模組" ],
-    summaryUpdatedAt: "07/13 08:10",
-  };
-});
-
-const RECOMMEND = [...WATCHLIST].sort((a,b) => Math.abs(b.score) - Math.abs(a.score)).slice(0,5);
-const MARKET = { name:"加權指數", value:22453, change:128, changePct:0.57, sparkline: genSpark(99, 1.2, 16, 220) };
-
-const MARKET_DETAIL = {
-  name:"加權指數", market:"TAIEX", price: MARKET.value,
-  priceChange: MARKET.change, changePct: MARKET.changePct,
-  score: 5.5, decision: decisionOf(5.5),
-  ohlc: genOHLC(99, 1.2, 300, MARKET.value*0.85),
-  indicators: [
-    { name:"MACD", value:"+1", dir:"up" },
-    { name:"RSI", value:"0", dir:"neutral" },
-    { name:"KD", value:"+1", dir:"up" },
-    { name:"MA60", value:"+1", dir:"up" },
-    { name:"BIAS", value:"0", dir:"neutral" },
-    { name:"布林通道", value:"0", dir:"neutral" },
-    { name:"DMI/ADX", value:"+1", dir:"up" },
-  ],
-  patterns: [{ label:"站上季線，中期偏多", type:"info" }],
-  summary: [ "大盤成交量溫和放大", "外資期現貨同步偏多" ],
-  summaryUpdatedAt: "07/13 13:45",
-};
-
-const FUTURES_SESSIONS = {
-  day: {
-    name:"台指期近月", market:"TX 日盤", price:22408, score:6.5,
-    priceChange:96, changePct:0.43,
-    sparkline: genSpark(88, 1.0, 12, 220),
-    ohlc: genOHLC(88, 1.0, 300, 21800),
-    indicators: [
-      { name:"MACD", value:"+1", dir:"up" },
-      { name:"RSI", value:"0", dir:"neutral" },
-      { name:"KD", value:"+1", dir:"up" },
-      { name:"MA60", value:"+1", dir:"up" },
-      { name:"BIAS", value:"0", dir:"neutral" },
-      { name:"布林通道", value:"0", dir:"neutral" },
-      { name:"DMI/ADX", value:"+1", dir:"up" },
-      { name:"MA交叉", value:"+1", dir:"up" },
-    ],
-    patterns: [{ label:"日盤延續加權指數偏多走勢", type:"up" }, { label:"ADX 趨勢確立", type:"info" }],
-    summary: [ "日盤量能與加權指數同步放大", "價差呈正價差，市場情緒偏多" ],
-    summaryUpdatedAt: "07/13 13:45",
-  },
-  night: {
-    name:"台指期近月", market:"TX 夜盤", price:22380, score:-3,
-    priceChange:-28, changePct:-0.12,
-    sparkline: genSpark(77, -0.6, 12, 220),
-    ohlc: genOHLC(77, -0.6, 300, 21800),
-    indicators: [
-      { name:"MACD", value:"-1", dir:"down" },
-      { name:"RSI", value:"0", dir:"neutral" },
-      { name:"KD", value:"-1", dir:"down" },
-      { name:"MA60", value:"0", dir:"neutral" },
-      { name:"BIAS", value:"0", dir:"neutral" },
-      { name:"布林通道", value:"0", dir:"neutral" },
-      { name:"DMI/ADX", value:"0", dir:"neutral" },
-      { name:"MA交叉", value:"0", dir:"neutral" },
-    ],
-    patterns: [{ label:"夜盤量能清淡，訊號僅供參考", type:"info" }],
-    summary: [ "夜盤成交量明顯低於日盤，波動參考價值較低", "美股開盤前追蹤是否有進一步跳動" ],
-    summaryUpdatedAt: "07/13 23:30",
-  },
-};
+let MARKET_DETAIL = null;
+let FUTURES_SESSIONS = { day: null, night: null };
+let WATCHLIST = [];
+let RECOMMEND = [];
 let currentFuturesSession = "day";
-
 let currentStockId = null;
 let currentSort = "default";
+
+/* 把 monitor.py 產生的 latest.json 單一標的資料，整理成看板畫面要的欄位形狀 */
+function mapEntry(entry){
+  if(!entry) return null;
+  const hasPattern = entry.patterns && entry.patterns[0] && entry.patterns[0].label !== "今日無特殊型態訊號";
+  return {
+    id: entry.label,
+    name: entry.name || entry.label,
+    market: entry.label,
+    price: entry.close,
+    priceChange: entry.price_change || 0,
+    changePct: entry.change_pct || 0,
+    score: entry.score,
+    maxScore: 15,
+    decision: entry.decision,
+    reason: hasPattern ? entry.patterns[0].label : "",
+    indicators: entry.indicators || [],
+    patterns: entry.patterns || [],
+    summary: entry.summary || [],
+    summaryUpdatedAt: entry.date || "",
+    ohlc: entry.ohlc_history || [],
+    levels: entry.levels || null,
+    backtest: entry.backtest || null,
+  };
+}
+
+function showLoadError(message){
+  const el = document.getElementById("loadError");
+  el.style.display = "block";
+  el.textContent = message;
+}
+
+async function loadData(){
+  try{
+    const res = await fetch("./data/latest.json", { cache: "no-store" });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    initFromData(data);
+  }catch(e){
+    console.error("讀取 latest.json 失敗", e);
+    showLoadError("目前讀不到最新資料（./data/latest.json）。可能是 GitHub Actions 還沒執行過、或路徑不對，請確認 daily_monitor.yml 有成功跑過一次。");
+  }
+}
+
+function initFromData(data){
+  const EXCLUDE = new Set(["TAIEX", "TX_day", "TX_night"]);
+
+  MARKET_DETAIL = mapEntry(data.TAIEX);
+  FUTURES_SESSIONS = { day: mapEntry(data.TX_day), night: mapEntry(data.TX_night) };
+  WATCHLIST = Object.keys(data).filter(k => !EXCLUDE.has(k)).map(k => mapEntry(data[k])).filter(Boolean);
+  RECOMMEND = [...WATCHLIST].sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 5);
+
+  renderHome();
+  renderWatchlist();
+  renderRecommend();
+}
 
 /* ---------- 列表 row 產生器 ---------- */
 function stockRowHtml(s){
@@ -703,25 +646,31 @@ function bindRowClicks(container){
 }
 
 function renderHome(){
-  document.getElementById("marketValue").textContent = MARKET.value.toLocaleString();
-  const up = MARKET.change >= 0;
-  const chEl = document.getElementById("marketChange");
-  chEl.textContent = `${up?"▲":"▼"} ${Math.abs(MARKET.change)}（${up?"+":""}${MARKET.changePct}%）`;
-  chEl.className = "idx-change " + (up?"up":"down");
-  drawSparkline("marketSparkline", MARKET.sparkline, 300, 32);
+  if(MARKET_DETAIL){
+    document.getElementById("marketValue").textContent = MARKET_DETAIL.price.toLocaleString();
+    const up = MARKET_DETAIL.priceChange >= 0;
+    const chEl = document.getElementById("marketChange");
+    chEl.textContent = `${up?"▲":"▼"} ${Math.abs(MARKET_DETAIL.priceChange)}（${up?"+":""}${MARKET_DETAIL.changePct}%）`;
+    chEl.className = "idx-change " + (up?"up":"down");
+    drawSparkline("marketSparkline", MARKET_DETAIL.ohlc.slice(-16).map(o=>o.close), 300, 32);
+  }
 
   const futuresHome = FUTURES_SESSIONS.day;
-  document.getElementById("futuresValue").textContent = futuresHome.price.toLocaleString();
-  const fUp = futuresHome.priceChange >= 0;
-  const fChEl = document.getElementById("futuresChange");
-  fChEl.textContent = `${fUp?"▲":"▼"} ${Math.abs(futuresHome.priceChange)}（${fUp?"+":""}${futuresHome.changePct}%）`;
-  fChEl.className = "idx-change " + (fUp?"up":"down");
-  drawSparkline("futuresSparkline", futuresHome.sparkline, 300, 32);
+  if(futuresHome){
+    document.getElementById("futuresValue").textContent = futuresHome.price.toLocaleString();
+    const fUp = futuresHome.priceChange >= 0;
+    const fChEl = document.getElementById("futuresChange");
+    fChEl.textContent = `${fUp?"▲":"▼"} ${Math.abs(futuresHome.priceChange)}（${fUp?"+":""}${futuresHome.changePct}%）`;
+    fChEl.className = "idx-change " + (fUp?"up":"down");
+    drawSparkline("futuresSparkline", futuresHome.ohlc.slice(-16).map(o=>o.close), 300, 32);
 
-  const basis = Math.round((futuresHome.price - MARKET.value) * 10) / 10;
-  const basisUp = basis >= 0;
-  document.getElementById("basisRow").innerHTML =
-    `價差（台指期－加權指數）：<span class="${basisUp?'b-up':'b-down'}">${basisUp?'+':''}${basis}（${basisUp?'正價差':'逆價差'}）</span>`;
+    if(MARKET_DETAIL){
+      const basis = Math.round((futuresHome.price - MARKET_DETAIL.price) * 10) / 10;
+      const basisUp = basis >= 0;
+      document.getElementById("basisRow").innerHTML =
+        `價差（台指期－加權指數）：<span class="${basisUp?'b-up':'b-down'}">${basisUp?'+':''}${basis}（${basisUp?'正價差':'逆價差'}）</span>`;
+    }
+  }
 
   const buyN = WATCHLIST.filter(s=>s.decision==="買進").length;
   const sellN = WATCHLIST.filter(s=>s.decision==="賣出").length;
@@ -731,14 +680,14 @@ function renderHome(){
   document.getElementById("statHold").textContent = holdN;
 
   const homeList = document.getElementById("homeRecommendList");
-  homeList.innerHTML = RECOMMEND.map(stockRowHtml).join("");
+  homeList.innerHTML = RECOMMEND.map(stockRowHtml).join("") || `<div class="empty">尚無資料</div>`;
   bindRowClicks(homeList);
 }
 
 function renderRecommend(){
   document.getElementById("recCount").textContent = RECOMMEND.length;
   const el = document.getElementById("recommendList");
-  el.innerHTML = RECOMMEND.map(stockRowHtml).join("");
+  el.innerHTML = RECOMMEND.map(stockRowHtml).join("") || `<div class="empty">尚無資料</div>`;
   bindRowClicks(el);
 }
 
@@ -753,62 +702,11 @@ function sortedWatchlist(){
 function renderWatchlist(){
   document.getElementById("watchCount").textContent = WATCHLIST.length;
   const el = document.getElementById("watchlistList");
-  el.innerHTML = sortedWatchlist().map(stockRowHtml).join("");
+  el.innerHTML = sortedWatchlist().map(stockRowHtml).join("") || `<div class="empty">尚無資料</div>`;
   bindRowClicks(el);
 }
 
 /* ---------- 個股詳情 ---------- */
-function computeLevels(data){
-  // 範本用簡化公式模擬 ATR/支撐壓力效果，實際上線後改吃 calculate_price_levels() 算出的真實數字
-  const price = data.price;
-  const atrPct = 0.022; // 模擬近期波動幅度
-  if(data.decision === "買進"){
-    const stopAtr = price * (1 - atrPct*1.5);
-    const risk = price - stopAtr;
-    return {
-      entry: price,
-      stopAtr: stopAtr,
-      stopSr: price * 0.955,
-      targetRr: price + risk*3,
-      targetSr: price * 1.05,
-    };
-  }
-  if(data.decision === "賣出"){
-    const stopAtr = price * (1 + atrPct*1.5);
-    const risk = stopAtr - price;
-    return {
-      entry: price,
-      stopAtr: stopAtr,
-      stopSr: price * 1.045,
-      targetRr: price - risk*3,
-      targetSr: price * 0.95,
-    };
-  }
-  return null;
-}
-
-function computeBacktestMock(data){
-  if(data.decision !== "買進" && data.decision !== "賣出") return null;
-  const seed = data.price + data.score;
-  const strength = Math.min(1, Math.abs(data.score) / 15); // 分數越極端，模擬勝率越偏一邊
-  const dir = data.decision === "買進" ? 1 : -1;
-
-  function makeStat(seedOffset, baseCount){
-    const count = baseCount + Math.floor(pseudoRandom(seed+seedOffset)*8);
-    const winRate = Math.round((48 + strength*18 + (pseudoRandom(seed+seedOffset+1)-0.5)*10) * 10) / 10;
-    const mean = Math.round((dir * (1 + strength*5) + (pseudoRandom(seed+seedOffset+2)-0.5)*3) * 100) / 100;
-    const median = Math.round((mean * 0.85) * 100) / 100;
-    const maxR = Math.round((Math.abs(mean)*3 + 6) * 10) / 10;
-    const minR = Math.round((-Math.abs(mean)*2 - 8) * 10) / 10;
-    return { count, winRate, mean, median, maxR, minR };
-  }
-
-  return {
-    h63: makeStat(1, 14),
-    h126: makeStat(9, 11),
-  };
-}
-
 function renderDetailData(data){
   document.getElementById("dtName").textContent = data.name;
   document.getElementById("dtId").textContent = data.market;
@@ -819,7 +717,9 @@ function renderDetailData(data){
   chEl.textContent = `${up?"▲":"▼"} ${Math.abs(data.priceChange)}（${up?"+":""}${data.changePct}%）`;
   chEl.className = "quote-change " + (up?"up":"down");
 
-  drawCandlestick("dtKline", data.ohlc);
+  if(data.ohlc && data.ohlc.length){
+    drawCandlestick("dtKline", data.ohlc);
+  }
 
   const dc = decisionClass(data.decision);
   const decEl = document.getElementById("dtDecision");
@@ -828,38 +728,40 @@ function renderDetailData(data){
   document.getElementById("dtScore").textContent = (data.score>0?"+":"") + data.score;
 
   const levelsBlock = document.getElementById("levelsBlock");
-  const levels = computeLevels(data);
-  if(levels){
+  if(data.levels){
+    const lv = data.levels;
     levelsBlock.style.display = "block";
-    document.getElementById("lvEntry").textContent = levels.entry.toLocaleString(undefined,{maximumFractionDigits:1});
-    document.getElementById("lvStopAtr").textContent = levels.stopAtr.toLocaleString(undefined,{maximumFractionDigits:1});
-    document.getElementById("lvStopSr").textContent = levels.stopSr.toLocaleString(undefined,{maximumFractionDigits:1});
-    document.getElementById("lvTargetRr").textContent = levels.targetRr.toLocaleString(undefined,{maximumFractionDigits:1});
-    document.getElementById("lvTargetSr").textContent = levels.targetSr.toLocaleString(undefined,{maximumFractionDigits:1});
+    const fmt = v => v.toLocaleString(undefined, {maximumFractionDigits:1});
+    document.getElementById("lvEntry").textContent = fmt(lv.entry_price);
+    document.getElementById("lvStopAtr").textContent = fmt(lv.stop_loss_atr);
+    document.getElementById("lvStopSr").textContent = fmt(lv.stop_loss_support);
+    document.getElementById("lvTargetRr").textContent = fmt(lv.take_profit_rr);
+    document.getElementById("lvTargetSr").textContent = fmt(lv.take_profit_resistance);
   } else {
     levelsBlock.style.display = "none";
   }
 
   const backtestBlock = document.getElementById("backtestBlock");
-  const bt = computeBacktestMock(data);
-  if(bt){
+  if(data.backtest){
     backtestBlock.style.display = "block";
     const fmtPct = v => (v>0?"+":"") + v + "%";
+    const fillCol = (prefix, stat) => {
+      if(stat && stat.count > 0){
+        document.getElementById(`${prefix}Count`).textContent = stat.count + " 次";
+        document.getElementById(`${prefix}Mean`).textContent = fmtPct(stat.mean_return_pct);
+        document.getElementById(`${prefix}Median`).textContent = fmtPct(stat.median_return_pct);
+        document.getElementById(`${prefix}Win`).textContent = stat.win_rate_pct + "%";
+        document.getElementById(`${prefix}Range`).textContent = `${fmtPct(stat.max_return_pct)} ／ ${fmtPct(stat.min_return_pct)}`;
+      } else {
+        ["Count","Mean","Median","Win","Range"].forEach(k => document.getElementById(`${prefix}${k}`).textContent = "—");
+      }
+    };
+    fillCol("bt3", data.backtest.h63);
+    fillCol("bt6", data.backtest.h126);
 
-    document.getElementById("bt3Count").textContent = bt.h63.count + " 次";
-    document.getElementById("bt3Mean").textContent = fmtPct(bt.h63.mean);
-    document.getElementById("bt3Median").textContent = fmtPct(bt.h63.median);
-    document.getElementById("bt3Win").textContent = bt.h63.winRate + "%";
-    document.getElementById("bt3Range").textContent = `${fmtPct(bt.h63.maxR)} ／ ${fmtPct(bt.h63.minR)}`;
-
-    document.getElementById("bt6Count").textContent = bt.h126.count + " 次";
-    document.getElementById("bt6Mean").textContent = fmtPct(bt.h126.mean);
-    document.getElementById("bt6Median").textContent = fmtPct(bt.h126.median);
-    document.getElementById("bt6Win").textContent = bt.h126.winRate + "%";
-    document.getElementById("bt6Range").textContent = `${fmtPct(bt.h126.maxR)} ／ ${fmtPct(bt.h126.minR)}`;
-
-    const minCount = Math.min(bt.h63.count, bt.h126.count);
-    document.getElementById("btNote").textContent = minCount < 10
+    const counts = [data.backtest.h63, data.backtest.h126].filter(Boolean).map(s=>s.count||0);
+    const minCount = counts.length ? Math.min(...counts) : 0;
+    document.getElementById("btNote").textContent = (minCount > 0 && minCount < 10)
       ? `樣本數偏少（最少只有${minCount}次），統計可信度有限`
       : "";
   } else {
@@ -877,8 +779,10 @@ function renderDetailData(data){
     `<span class="pbadge ${p.type}">${p.label}</span>`
   ).join("");
 
-  document.getElementById("dtSummary").innerHTML = data.summary.map(s => `<li>${s}</li>`).join("");
-  document.getElementById("dtSummaryMeta").textContent = `更新於 ${data.summaryUpdatedAt}`;
+  document.getElementById("dtSummary").innerHTML = data.summary.length
+    ? data.summary.map(s => `<li>${s}</li>`).join("")
+    : `<li>尚無參考摘要（新聞/財報 AI 摘要模組尚未串接）</li>`;
+  document.getElementById("dtSummaryMeta").textContent = data.summaryUpdatedAt ? `更新於 ${data.summaryUpdatedAt}` : "";
 
   document.getElementById("detailOverlay").classList.add("active");
 }
@@ -893,7 +797,8 @@ function openDetail(id){
 
 function openFuturesDetail(session){
   currentFuturesSession = session;
-  const data = { ...FUTURES_SESSIONS[session], decision: decisionOf(FUTURES_SESSIONS[session].score) };
+  const data = FUTURES_SESSIONS[session];
+  if(!data) return;
 
   document.getElementById("sessionToggle").style.display = "flex";
   document.querySelectorAll(".session-btn").forEach(btn =>
@@ -904,6 +809,7 @@ function openFuturesDetail(session){
 }
 
 function openMarketDetail(){
+  if(!MARKET_DETAIL) return;
   document.getElementById("sessionToggle").style.display = "none";
   renderDetailData(MARKET_DETAIL);
 }
@@ -947,9 +853,7 @@ function renderDate(){
 }
 
 renderDate();
-renderHome();
-renderWatchlist();
-renderRecommend();
+loadData();
 
 if("serviceWorker" in navigator){
   window.addEventListener("load", () => {
