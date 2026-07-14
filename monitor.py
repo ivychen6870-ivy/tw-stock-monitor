@@ -62,6 +62,14 @@ CORE_WATCHLIST = [
     "6139",  # 亞翔
 ]
 
+STOCK_NAMES = {
+    "2330": "台積電", "2317": "鴻海", "2454": "聯發科", "0050": "元大台灣50",
+    "5309": "系統電", "2421": "建準", "2486": "一詮", "2399": "映泰",
+    "3481": "群創", "3324": "雙鴻", "3017": "奇鋐", "3653": "健策",
+    "8210": "勤誠", "6691": "洋基工程", "5347": "世界先進", "6719": "力智",
+    "3711": "日月光投控", "2344": "華邦電", "2059": "川湖", "6139": "亞翔",
+}
+
 FUTURES_ID = "TX"
 
 DATA_DIR = "docs/data"
@@ -201,10 +209,55 @@ def push_message(text: str):
 # 單一標的：算訊號 → 算價位 → 算回測
 # ============================================================
 
-def analyze_symbol(label: str, df: pd.DataFrame) -> dict:
+def _dir_of(condition) -> str:
+    return "up" if condition else "neutral"
+
+
+def build_indicator_breakdown(latest) -> list:
+    """把 tw_stock_indicators.generate_signals() 算出來的欄位，整理成看板要的簡短指標清單"""
+    def sign_dir(v):
+        if v is None or pd.isna(v):
+            return "neutral"
+        return "up" if v > 0 else ("down" if v < 0 else "neutral")
+
+    items = [
+        {"name": "MACD", "value": f"{latest['macd_hist']:.2f}", "dir": sign_dir(latest.get("macd_hist"))},
+        {"name": "RSI", "value": f"{latest['rsi']:.1f}", "dir": "up" if latest.get("rsi", 50) < 30 else ("down" if latest.get("rsi", 50) > 70 else "neutral")},
+        {"name": "KD", "value": f"K{latest['k']:.0f}/D{latest['d']:.0f}", "dir": "up" if latest.get("k", 0) > latest.get("d", 0) else "down"},
+        {"name": "MA60", "value": "站上" if latest["close"] > latest.get("ma60", 0) else "跌破", "dir": "up" if latest["close"] > latest.get("ma60", 0) else "down"},
+        {"name": "DMI/ADX", "value": f"ADX{latest['adx']:.0f}", "dir": "up" if latest.get("plus_di", 0) > latest.get("minus_di", 0) else "down"},
+    ]
+    return items
+
+
+def build_pattern_hits(latest) -> list:
+    """把當天命中的型態訊號（布林值欄位）整理成看板要的徽章清單"""
+    pattern_map = [
+        ("ma_golden_cross", "MA黃金交叉", "up"), ("ma_death_cross", "MA死亡交叉", "down"),
+        ("kd_golden_cross", "KD黃金交叉", "up"), ("kd_death_cross", "KD死亡交叉", "down"),
+        ("breakout_up", "突破近20日壓力", "up"), ("breakout_down", "跌破近20日支撐", "down"),
+        ("hammer", "錘子線", "up"), ("hanging_man", "吊人線", "down"),
+        ("bullish_engulfing", "多頭吞噬", "up"), ("bearish_engulfing", "空頭吞噬", "down"),
+        ("morning_star", "晨星", "up"), ("evening_star", "暮星", "down"),
+        ("double_top", "M頭/雙重頂", "down"), ("double_bottom", "W底/雙重底", "up"),
+    ]
+    hits = [{"label": label, "type": t} for col, label, t in pattern_map if latest.get(col)]
+    if latest.get("divergence_rsi") == "bullish":
+        hits.append({"label": "RSI底背離", "type": "up"})
+    elif latest.get("divergence_rsi") == "bearish":
+        hits.append({"label": "RSI頂背離", "type": "down"})
+    if latest.get("whipsaw"):
+        hits.append({"label": "近期訊號反覆，可信度較低", "type": "info"})
+    if not hits:
+        hits.append({"label": "今日無特殊型態訊號", "type": "info"})
+    return hits
+
+
+def analyze_symbol(label: str, df: pd.DataFrame, name: str = None) -> dict:
     """
     對單一標的（股票/大盤/期貨）跑完整分析流程，回傳字典結果，
     同時供推播訊息跟網頁JSON使用。
+    name：中文名稱（給網頁看板顯示用），沒有提供就沿用 label。
     """
     result = generate_signals(df)
     levels = calculate_price_levels(df, result)
@@ -213,12 +266,22 @@ def analyze_symbol(label: str, df: pd.DataFrame) -> dict:
     latest = combined.iloc[-1]
     decision = latest["decision"]
 
+    close = float(latest["close"])
+    prev_close = float(combined["close"].iloc[-2]) if len(combined) >= 2 else None
+    price_change = round(close - prev_close, 2) if prev_close else 0.0
+    change_pct = round((close - prev_close) / prev_close * 100, 2) if prev_close else 0.0
+
     entry = {
         "label": label,
+        "name": name or label,
         "date": str(combined.index[-1].date()),
-        "close": round(float(latest["close"]), 2),
+        "close": round(close, 2),
+        "price_change": price_change,
+        "change_pct": change_pct,
         "score": round(float(latest["score"]), 2),
         "decision": decision,
+        "indicators": build_indicator_breakdown(latest),
+        "patterns": build_pattern_hits(latest),
     }
 
     if decision != "觀望":
@@ -291,7 +354,7 @@ def main():
         try:
             df = get_symbol_dataframe(history, stock_id,
                                        lambda sd, sid=stock_id: fetch_stock_price_range_adjusted(sid, sd))
-            entry = analyze_symbol(stock_id, df)
+            entry = analyze_symbol(stock_id, df, name=STOCK_NAMES.get(stock_id, stock_id))
             all_results[stock_id] = entry
             if entry["decision"] == "買進":
                 buy_list.append(entry)
