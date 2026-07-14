@@ -141,11 +141,24 @@ def fetch_otc_month_via_finmind(stock_id: str, year: int, month: int, token: str
     return rows
 
 
+# 已經確認過的上櫃股票（櫃買中心端點在 GitHub Actions 雲端環境幾乎必定被擋），
+# 這幾檔直接跳過上市/上櫃爬蟲，改走 FinMind 備援，避免每個月都跑一次注定失敗的請求，
+# 讓 log 乾淨、也跑得快一點。之後如果 CORE_WATCHLIST 加了新的上櫃股票，
+# 先讓它照正常流程跑（上市->上櫃->FinMind），如果穩定失敗再加進這個清單。
+KNOWN_OTC_STOCKS_NEEDING_FINMIND = {"5309", "3324", "5347"}
+
+
 def fetch_month_ohlc_any_market(stock_id: str, year: int, month: int, finmind_token: str = "") -> list:
     """
     先試上市（證交所），抓不到再試上櫃（櫃買中心），
     櫃買中心也失敗的話（常見於雲端環境被擋），最後改用 FinMind 免費資料集當備援。
+
+    stock_id 在 KNOWN_OTC_STOCKS_NEEDING_FINMIND 清單裡的話，直接跳過前兩層爬蟲，
+    省下注定失敗的請求時間。
     """
+    if stock_id in KNOWN_OTC_STOCKS_NEEDING_FINMIND:
+        return fetch_otc_month_via_finmind(stock_id, year, month, finmind_token)
+
     rows = fetch_month_ohlc(stock_id, year, month)
     if rows:
         return rows
