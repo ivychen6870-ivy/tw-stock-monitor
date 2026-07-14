@@ -313,12 +313,16 @@ def detect_double_top_bottom(df: pd.DataFrame, order: int = 10,
     peak_idx = peaks.index
     for i in range(1, len(peak_idx)):
         prev_i, curr_i = peak_idx[i - 1], peak_idx[i]
+        if price[prev_i] <= 0:
+            continue  # 前一個高點價格是0或異常值（例如備援資料源偶爾夾雜的髒資料），無法算比例，跳過
         if abs(price[curr_i] - price[prev_i]) / price[prev_i] <= tolerance:
             double_top[curr_i] = True
 
     trough_idx = troughs.index
     for i in range(1, len(trough_idx)):
         prev_i, curr_i = trough_idx[i - 1], trough_idx[i]
+        if price[prev_i] <= 0:
+            continue
         if abs(price[curr_i] - price[prev_i]) / price[prev_i] <= tolerance:
             double_bottom[curr_i] = True
 
