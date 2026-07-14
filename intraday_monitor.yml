@@ -1,14 +1,14 @@
 name: 台股盤中即時更新
 on:
-  # ⚠️ 暫時停用中：新版 monitor.py 還沒做 intraday 模式判斷，
-  # 這個排程繼續開著的話，10:00/12:00 會變成又跑一次完整的每日分析，
-  # 造成重複推播、多耗FinMind額度。等盤中即時功能重新做好，
-  # 把下面 schedule 的註解拿掉即可恢復。
-  #
-  # schedule:
-  #   - cron: "0 2 * * 1-5"
-  #   - cron: "0 4 * * 1-5"
-  workflow_dispatch: {}   # 保留手動觸發，方便之後測試新的盤中功能
+  schedule:
+    # 台灣時間 09:00~13:55，每5分鐘一次（09:00-13:30為正常交易時段，
+    # 尾巴多留一點緩衝，收盤後幾次會抓到收盤定盤價，不影響正確性）
+    # UTC 01:00~05:55 對應 台灣時間 09:00~13:55
+    #
+    # ⚠️ GitHub Actions 的排程時間「不保證準時」，官方文件明講排程頻率越高、
+    # 尖峰時段延遲的機率越大，5分鐘設定已經接近實務下限，別預期每次都準時
+    - cron: "*/5 1-5 * * 1-5"
+  workflow_dispatch: {}   # 允許手動觸發，方便測試
 jobs:
   intraday:
     runs-on: ubuntu-latest
@@ -29,13 +29,12 @@ jobs:
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python monitor.py intraday
-      - name: 把最新即時價格存回 repo
+      - name: 把最新即時資料存回 repo
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add docs/data/latest.csv docs/data/intraday_signals.json
+          git add docs/data/latest.json
           git diff --staged --quiet || git commit -m "盤中即時更新 $(date +%Y-%m-%d' '%H:%M)"
           git fetch origin main
           git merge -X ours origin/main --no-edit || (git checkout --ours docs/data/ && git add docs/data/ && git commit --no-edit)
