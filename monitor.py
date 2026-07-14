@@ -33,6 +33,7 @@ import json
 from datetime import datetime, timedelta
 
 import pandas as pd
+import requests
 
 from fetch_tw_stock_data import fetch_futures_daily
 from fetch_tw_price_native import fetch_stock_price_range_adjusted, fetch_index_price_range
@@ -398,5 +399,145 @@ def main():
     print(f"完成，共分析 {len(all_results)} 個標的，已寫入 {DATA_DIR}/latest.json 與 {DATA_DIR}/{HISTORY_FILE_NAME}")
 
 
+# ============================================================
+# 盤中即時更新
+# ============================================================
+
+def fetch_realtime_quotes(stock_ids: list) -> dict:
+    """
+    抓取盤中即時報價（免費，證交所基本市況報導網站，非官方文件化端點，
+    穩定性不像 OpenAPI 有保障，失敗會回傳空字典，呼叫端要自行處理）。
+    只查傳入的股票代號，不涵蓋全市場。
+
+    回傳 { 代號: {"name":..., "price":..., "open":..., "high":..., "low":..., "volume":...} }
+    """
+    if not stock_ids:
+        return {}
+    query = "|".join(f"tse_{c}.tw" for c in stock_ids)
+    url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={query}&json=1&delay=0"
+    try:
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"抓取盤中即時報價失敗：{e}")
+        return {}
+
+    quotes = {}
+    for item in data.get("msgArray", []):
+        code = item.get("c")
+        try:
+            price = float(item.get("z"))
+        except (TypeError, ValueError):
+            continue  # 尚未成交或非交易時段，沒有最新成交價，這檔這次先跳過
+        def safe_float(key, default):
+            try:
+                return float(item.get(key))
+            except (TypeError, ValueError):
+                return default
+        quotes[code] = {
+            "name": item.get("n", ""),
+            "price": price,
+            "open": safe_float("o", price),
+            "high": safe_float("h", price),
+            "low": safe_float("l", price),
+            "volume": safe_float("v", 0),
+        }
+    return quotes
+
+
+def intraday_main():
+    """
+    盤中即時更新：用「歷史資料 + 即時報價組成的暫定今日K棒」，完整重跑一次
+    generate_signals/calculate_price_levels/backtest_signal_returns，
+    效果等同提早看到「如果現在收盤」的技術面判斷。
+
+    這些是暫定訊號，收盤前價格還可能變動，跟收盤後 daily_monitor 正式跑出來的
+    結果不一定一樣。只更新 docs/data/latest.json（給網頁看板用），
+    不會寫進 docs/data/history.json，避免暫定資料污染正式的歷史紀錄。
+    """
+    os.makedirs(DATA_DIR, exist_ok=True)
+    history = load_history()
+    if not history:
+        print("history.json 是空的，請先跑過 backfill_history.py 或至少一次 daily_monitor，略過本次盤中更新")
+        return
+
+    quotes = fetch_realtime_quotes(CORE_WATCHLIST)
+    if not quotes:
+        print("盤中即時報價抓取失敗或無資料（可能非交易時段），略過本次更新")
+        return
+
+    latest_path = os.path.join(DATA_DIR, "latest.json")
+    all_results = {}
+    if os.path.exists(latest_path):
+        try:
+            with open(latest_path, "r", encoding="utf-8") as f:
+                all_results = json.load(f)
+        except Exception as e:
+            print(f"讀取既有 latest.json 失敗，將視為空重新開始：{e}")
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%H:%M")
+    buy_list, sell_list = [], []
+
+    for stock_id in CORE_WATCHLIST:
+        q = quotes.get(stock_id)
+        hist_records = history.get(stock_id, [])
+        if not q or not hist_records:
+            continue
+        try:
+            base_records = [r for r in hist_records if r["date"] != today_str]
+            provisional = base_records + [{
+                "date": today_str, "open": q["open"], "high": q["high"],
+                "low": q["low"], "close": q["price"], "volume": q["volume"],
+            }]
+            df = records_to_df(provisional)
+            entry = analyze_symbol(stock_id, df, name=STOCK_NAMES.get(stock_id, stock_id))
+            entry["is_intraday"] = True
+            entry["intraday_time"] = now_str
+            all_results[stock_id] = entry
+
+            if entry["decision"] == "買進":
+                buy_list.append(entry)
+            elif entry["decision"] == "賣出":
+                sell_list.append(entry)
+        except Exception as e:
+            print(f"{stock_id} 盤中分析失敗，略過：{e}")
+
+    with open(latest_path, "w", encoding="utf-8") as f:
+        json.dump(all_results, f, ensure_ascii=False)
+
+    def format_entry_line(e):
+        lv = e.get("levels", {})
+        line = f"{'🔴' if e['decision']=='買進' else '🟢'} {e['label']}　{e['close']}　評分{e['score']}"
+        if lv:
+            line += (f"\n　　進場 {lv['entry_price']} ／ 停損(ATR) {lv['stop_loss_atr']} "
+                     f"／ 停利(RR) {lv['take_profit_rr']}")
+        return line
+
+    if buy_list or sell_list:
+        lines = [f"⏱ 盤中即時訊號　{now_str}", DIVIDER]
+        if buy_list:
+            lines.append("【盤中買進訊號】")
+            lines += [format_entry_line(e) for e in buy_list]
+        if sell_list:
+            lines.append("【盤中賣出訊號】")
+            lines += [format_entry_line(e) for e in sell_list]
+        lines.append("")
+        lines.append(DIVIDER)
+        lines.append("※ 盤中訊號為暫定值，以收盤後正式結果為準，僅供參考，不構成投資建議")
+        message = "\n".join(lines)
+        print(message)
+        push_message(message)
+    else:
+        print(f"盤中更新完成（{now_str}），目前沒有買進/賣出訊號")
+
+    print(f"盤中分析完成，共更新 {len(quotes)} 檔即時報價")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "intraday":
+        intraday_main()
+    else:
+        main()
