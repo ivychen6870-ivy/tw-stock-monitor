@@ -215,17 +215,42 @@ def _dir_of(condition) -> str:
 
 
 def build_indicator_breakdown(latest) -> list:
-    """把 tw_stock_indicators.generate_signals() 算出來的欄位，整理成看板要的簡短指標清單"""
+    """
+    把 tw_stock_indicators.generate_signals() 算出來的欄位，整理成看板要的指標清單。
+    對應計分邏輯裡的7個核心指標：MACD、RSI、KD、MA60、BIAS、布林通道、DMI/ADX
+    （之前的版本漏掉了BIAS跟布林通道兩項顯示，計分本身沒有漏，只是畫面沒顯示出來）
+    """
     def sign_dir(v):
         if v is None or pd.isna(v):
             return "neutral"
         return "up" if v > 0 else ("down" if v < 0 else "neutral")
 
+    close = latest["close"]
+    boll_upper = latest.get("boll_upper")
+    boll_lower = latest.get("boll_lower")
+    bias = latest.get("bias")
+
+    if boll_upper is not None and close >= boll_upper:
+        boll_val, boll_dir = "觸及上軌", "down"
+    elif boll_lower is not None and close <= boll_lower:
+        boll_val, boll_dir = "觸及下軌", "up"
+    else:
+        boll_val, boll_dir = "區間內", "neutral"
+
+    if bias is not None and bias < -5:
+        bias_dir = "up"
+    elif bias is not None and bias > 5:
+        bias_dir = "down"
+    else:
+        bias_dir = "neutral"
+
     items = [
         {"name": "MACD", "value": f"{latest['macd_hist']:.2f}", "dir": sign_dir(latest.get("macd_hist"))},
         {"name": "RSI", "value": f"{latest['rsi']:.1f}", "dir": "up" if latest.get("rsi", 50) < 30 else ("down" if latest.get("rsi", 50) > 70 else "neutral")},
         {"name": "KD", "value": f"K{latest['k']:.0f}/D{latest['d']:.0f}", "dir": "up" if latest.get("k", 0) > latest.get("d", 0) else "down"},
-        {"name": "MA60", "value": "站上" if latest["close"] > latest.get("ma60", 0) else "跌破", "dir": "up" if latest["close"] > latest.get("ma60", 0) else "down"},
+        {"name": "MA60", "value": "站上" if close > latest.get("ma60", 0) else "跌破", "dir": "up" if close > latest.get("ma60", 0) else "down"},
+        {"name": "BIAS", "value": f"{bias:.1f}%" if bias is not None else "—", "dir": bias_dir},
+        {"name": "布林通道", "value": boll_val, "dir": boll_dir},
         {"name": "DMI/ADX", "value": f"ADX{latest['adx']:.0f}", "dir": "up" if latest.get("plus_di", 0) > latest.get("minus_di", 0) else "down"},
     ]
     return items
