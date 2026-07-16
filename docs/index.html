@@ -46,6 +46,14 @@
   .topbar .title{ font-size:19.5px; font-weight:700; }
   .topbar .date{ font-size:14px; color:var(--text-2); }
 
+  .freshness-bar{
+    padding:8px 16px; font-size:13px; text-align:center; font-weight:600;
+    border-bottom:1px solid var(--border);
+  }
+  .freshness-bar.fresh{ background:#E7F7F1; color:#0F7A50; }
+  .freshness-bar.stale{ background:#FBF2DE; color:#8A6200; }
+  .freshness-bar.old{ background:#FCEBEA; color:#B3261E; }
+
   /* ---------- Tab 內容區 ---------- */
   .tab-panel{ display:none; }
   .tab-panel.active{ display:block; }
@@ -246,6 +254,7 @@
     <span class="title">台股訊號</span>
     <span class="date" id="dateNow">--</span>
   </div>
+  <div class="freshness-bar" id="freshnessBar">資料時間讀取中...</div>
   <div id="loadError" style="display:none; padding:10px 16px; background:#FCEBEA; color:#B3261E; font-size:12px; line-height:1.5;"></div>
 
   <!-- ============ 首頁 ============ -->
@@ -605,18 +614,65 @@ async function loadData(){
   }
 }
 
+function renderFreshness(meta){
+  const bar = document.getElementById("freshnessBar");
+  if(!meta || !meta.generated_at){
+    bar.textContent = "無法確認資料時間（latest.json 缺少 _meta 欄位，可能是舊版資料）";
+    bar.className = "freshness-bar old";
+    return;
+  }
+
+  const generated = new Date(meta.generated_at);
+  const now = new Date();
+  const diffMin = Math.round((now - generated) / 60000);
+  const hh = String(generated.getHours()).padStart(2,"0");
+  const mm = String(generated.getMinutes()).padStart(2,"0");
+  const modeLabel = meta.mode === "intraday" ? "盤中即時" : "每日收盤";
+
+  let ageText;
+  if(diffMin < 1) ageText = "剛剛";
+  else if(diffMin < 60) ageText = `${diffMin}分鐘前`;
+  else ageText = `${Math.floor(diffMin/60)}小時${diffMin%60}分鐘前`;
+
+  bar.textContent = `資料更新於 ${hh}:${mm}（${ageText}）· ${modeLabel}`;
+
+  if(diffMin <= 20) bar.className = "freshness-bar fresh";
+  else if(diffMin <= 60) bar.className = "freshness-bar stale";
+  else bar.className = "freshness-bar old";
+}
+
+let currentMeta = null;
+
 function initFromData(data){
-  const EXCLUDE = new Set(["TAIEX", "TX_day", "TX_night"]);
+  const EXCLUDE = new Set(["TAIEX", "TX_day", "TX_night", "_meta", "_recommend"]);
 
   MARKET_DETAIL = mapEntry(data.TAIEX);
   FUTURES_SESSIONS = { day: mapEntry(data.TX_day), night: mapEntry(data.TX_night) };
-  WATCHLIST = Object.keys(data).filter(k => !EXCLUDE.has(k)).map(k => mapEntry(data[k])).filter(Boolean);
-  RECOMMEND = [...WATCHLIST].sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 5);
+
+  // 自選股：只列真正在追蹤清單裡的股票，候選股（全市場掃描出來的）不算進自選股
+  WATCHLIST = Object.keys(data)
+    .filter(k => !EXCLUDE.has(k) && !data[k].is_candidate)
+    .map(k => mapEntry(data[k])).filter(Boolean);
+
+  // 推薦股：直接用後端已經排序好的清單（自選股+候選股一起比較過分數），
+  // 找不到對應資料就跳過，不用前端自己重算
+  const recommendIds = Array.isArray(data._recommend) ? data._recommend : [];
+  RECOMMEND = recommendIds.map(id => mapEntry(data[id])).filter(Boolean);
+  if(RECOMMEND.length === 0){
+    // 沒有 _recommend 欄位（例如舊版資料），退回舊邏輯：從自選股裡抓分數最極端的5檔
+    RECOMMEND = [...WATCHLIST].sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 5);
+  }
+
+  currentMeta = data._meta || null;
+  renderFreshness(currentMeta);
 
   renderHome();
   renderWatchlist();
   renderRecommend();
 }
+
+setInterval(() => { if(currentMeta) renderFreshness(currentMeta); }, 60000);
+setInterval(loadData, 5 * 60000); // 頁面開著時，每5分鐘自動重新抓一次最新資料
 
 /* ---------- 列表 row 產生器 ---------- */
 function stockRowHtml(s){
@@ -682,7 +738,7 @@ function renderHome(){
   document.getElementById("statHold").textContent = holdN;
 
   const homeList = document.getElementById("homeRecommendList");
-  homeList.innerHTML = RECOMMEND.map(stockRowHtml).join("") || `<div class="empty">尚無資料</div>`;
+  homeList.innerHTML = RECOMMEND.slice(0, 5).map(stockRowHtml).join("") || `<div class="empty">尚無資料</div>`;
   bindRowClicks(homeList);
 }
 
