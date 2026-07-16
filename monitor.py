@@ -356,17 +356,21 @@ def is_etf_code(code: str) -> bool:
     return str(code).strip().startswith("00")
 
 
-def scan_market_candidates(top_n: int = MARKET_SCAN_CANDIDATES) -> list:
+def scan_market_candidates(top_n: int = MARKET_SCAN_CANDIDATES) -> tuple:
     """
     第一階段粗篩：一次抓全市場（上市+上櫃）當日資料，用「當日漲跌幅絕對值」排序，
     取前 top_n 檔當候選股。這只是粗篩，不是技術指標評分，純粹用來縮小範圍，
     避免對全部近2000檔股票都做完整技術分析（會超時、也會加重被擋的風險）。
+
+    回傳 (候選股代號清單, {代號: 名稱} 對照表)——名稱直接從全市場資料裡的
+    「證券名稱」欄位取得，不需要額外查詢，這樣候選股也能顯示正確中文名稱，
+    不會只有代號。
     """
     try:
         market_df = fetch_all_market_daily()
     except Exception as e:
         print(f"全市場（上市）資料抓取失敗，推薦股本次僅能用自選股結果：{e}")
-        return []
+        return [], {}
 
     try:
         otc_df = fetch_otc_market_daily()
@@ -376,21 +380,28 @@ def scan_market_candidates(top_n: int = MARKET_SCAN_CANDIDATES) -> list:
         print(f"全市場（上櫃）資料合併失敗，僅使用上市資料：{e}")
 
     if market_df.empty or "收盤價" not in market_df.columns:
-        return []
+        return [], {}
 
     pool = market_df[~market_df["證券代號"].astype(str).apply(is_etf_code)].copy()
     pool["漲跌幅%"] = (pool["漲跌價差"] / (pool["收盤價"] - pool["漲跌價差"])) * 100
     pool = pool.dropna(subset=["漲跌幅%"])
     pool = pool.reindex(pool["漲跌幅%"].abs().sort_values(ascending=False).index)
 
-    return pool["證券代號"].astype(str).head(top_n).tolist()
+    top_pool = pool.head(top_n)
+    ids = top_pool["證券代號"].astype(str).tolist()
+    name_lookup = dict(zip(top_pool["證券代號"].astype(str), top_pool["證券名稱"].astype(str))) \
+        if "證券名稱" in top_pool.columns else {}
+
+    return ids, name_lookup
 
 
-def analyze_candidate(stock_id: str) -> dict:
+def analyze_candidate(stock_id: str, name: str = None) -> dict:
     """
     對候選股做「輕量版」分析：只抓約 CANDIDATE_LOOKBACK_DAYS 天歷史（不是完整3年），
     跑一樣的 generate_signals/calculate_price_levels，但不算回測（歷史太短，回測沒意義），
     也不會寫進 history.json（候選股每天會變動，不是要長期追蹤的固定清單）。
+    name：中文名稱，優先用呼叫端傳入的（來自全市場掃描時順便抓到的證券名稱），
+    沒有的話退而求其次查 STOCK_NAMES，都沒有就顯示代號本身。
     """
     start_date = (datetime.now() - timedelta(days=CANDIDATE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
     df = fetch_stock_price_range_adjusted(stock_id, start_date)
@@ -408,7 +419,7 @@ def analyze_candidate(stock_id: str) -> dict:
 
     entry = {
         "label": stock_id,
-        "name": STOCK_NAMES.get(stock_id, stock_id),
+        "name": name or STOCK_NAMES.get(stock_id, stock_id),
         "date": str(combined.index[-1].date()),
         "close": round(close, 2),
         "price_change": price_change,
@@ -441,14 +452,14 @@ def build_recommend_list(watchlist_results: dict) -> tuple:
     依分數絕對值排序，取前 RECOMMEND_TOTAL 檔。
     回傳 (推薦股id清單, 候選股分析結果dict)，候選股結果要併入 latest.json 才能讓網頁查得到。
     """
-    candidate_ids = scan_market_candidates()
+    candidate_ids, name_lookup = scan_market_candidates()
     candidate_results = {}
 
     for stock_id in candidate_ids:
         if stock_id in watchlist_results:
             continue  # 已經在自選股裡分析過了，不用重複抓
         try:
-            candidate_results[stock_id] = analyze_candidate(stock_id)
+            candidate_results[stock_id] = analyze_candidate(stock_id, name=name_lookup.get(stock_id))
         except Exception as e:
             print(f"候選股 {stock_id} 分析失敗，略過：{e}")
 
