@@ -36,7 +36,10 @@ import pandas as pd
 import requests
 
 from fetch_tw_stock_data import fetch_futures_daily
-from fetch_tw_price_native import fetch_stock_price_range_adjusted, fetch_index_price_range
+from fetch_tw_price_native import (
+    fetch_stock_price_range_adjusted, fetch_index_price_range,
+    fetch_all_market_daily, fetch_otc_market_daily,
+)
 from tw_stock_indicators import generate_signals, calculate_price_levels, backtest_signal_returns
 
 # ============================================================
@@ -72,6 +75,11 @@ STOCK_NAMES = {
 }
 
 FUTURES_ID = "TX"
+
+# 推薦股（全市場掃描）設定
+MARKET_SCAN_CANDIDATES = 50   # 第一階段粗篩：當日漲跌幅最大的前N檔進入候選
+RECOMMEND_TOTAL = 30          # 第二階段精算後，最終推薦股數量
+CANDIDATE_LOOKBACK_DAYS = 130 # 候選股只抓約4.5個月歷史（夠算大部分指標，MA120/240會是NaN，這是預期取捨）
 
 DATA_DIR = "docs/data"
 HISTORY_FILE_NAME = "history.json"
@@ -340,6 +348,118 @@ def analyze_symbol(label: str, df: pd.DataFrame, name: str = None) -> dict:
 
 
 # ============================================================
+# 推薦股：全市場掃描 + 兩階段篩選
+# ============================================================
+
+def is_etf_code(code: str) -> bool:
+    """台股ETF代號幾乎都是「00」開頭（0050、00878等），排除掉避免推薦股清單被ETF洗版"""
+    return str(code).strip().startswith("00")
+
+
+def scan_market_candidates(top_n: int = MARKET_SCAN_CANDIDATES) -> list:
+    """
+    第一階段粗篩：一次抓全市場（上市+上櫃）當日資料，用「當日漲跌幅絕對值」排序，
+    取前 top_n 檔當候選股。這只是粗篩，不是技術指標評分，純粹用來縮小範圍，
+    避免對全部近2000檔股票都做完整技術分析（會超時、也會加重被擋的風險）。
+    """
+    try:
+        market_df = fetch_all_market_daily()
+    except Exception as e:
+        print(f"全市場（上市）資料抓取失敗，推薦股本次僅能用自選股結果：{e}")
+        return []
+
+    try:
+        otc_df = fetch_otc_market_daily()
+        if not otc_df.empty:
+            market_df = pd.concat([market_df, otc_df], ignore_index=True)
+    except Exception as e:
+        print(f"全市場（上櫃）資料合併失敗，僅使用上市資料：{e}")
+
+    if market_df.empty or "收盤價" not in market_df.columns:
+        return []
+
+    pool = market_df[~market_df["證券代號"].astype(str).apply(is_etf_code)].copy()
+    pool["漲跌幅%"] = (pool["漲跌價差"] / (pool["收盤價"] - pool["漲跌價差"])) * 100
+    pool = pool.dropna(subset=["漲跌幅%"])
+    pool = pool.reindex(pool["漲跌幅%"].abs().sort_values(ascending=False).index)
+
+    return pool["證券代號"].astype(str).head(top_n).tolist()
+
+
+def analyze_candidate(stock_id: str) -> dict:
+    """
+    對候選股做「輕量版」分析：只抓約 CANDIDATE_LOOKBACK_DAYS 天歷史（不是完整3年），
+    跑一樣的 generate_signals/calculate_price_levels，但不算回測（歷史太短，回測沒意義），
+    也不會寫進 history.json（候選股每天會變動，不是要長期追蹤的固定清單）。
+    """
+    start_date = (datetime.now() - timedelta(days=CANDIDATE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    df = fetch_stock_price_range_adjusted(stock_id, start_date)
+
+    result = generate_signals(df)
+    levels = calculate_price_levels(df, result)
+    combined = pd.concat([result, levels], axis=1)
+    latest = combined.iloc[-1]
+    decision = latest["decision"]
+
+    close = float(latest["close"])
+    prev_close = float(combined["close"].iloc[-2]) if len(combined) >= 2 else None
+    price_change = round(close - prev_close, 2) if prev_close else 0.0
+    change_pct = round((close - prev_close) / prev_close * 100, 2) if prev_close else 0.0
+
+    entry = {
+        "label": stock_id,
+        "name": STOCK_NAMES.get(stock_id, stock_id),
+        "date": str(combined.index[-1].date()),
+        "close": round(close, 2),
+        "price_change": price_change,
+        "change_pct": change_pct,
+        "score": round(float(latest["score"]), 2),
+        "decision": decision,
+        "indicators": build_indicator_breakdown(latest),
+        "patterns": build_pattern_hits(latest),
+        "is_candidate": True,  # 標記這是輕量掃描的候選股，不是完整追蹤的自選股
+    }
+    if decision != "觀望":
+        entry["levels"] = {
+            "entry_price": round(float(latest["entry_price"]), 2),
+            "stop_loss_atr": round(float(latest["stop_loss_atr"]), 2),
+            "stop_loss_support": round(float(latest["stop_loss_support"]), 2),
+            "take_profit_rr": round(float(latest["take_profit_rr"]), 2),
+            "take_profit_resistance": round(float(latest["take_profit_resistance"]), 2),
+        }
+    entry["ohlc_history"] = [
+        {"date": str(idx.date()), "open": round(float(r.open), 2), "high": round(float(r.high), 2),
+         "low": round(float(r.low), 2), "close": round(float(r.close), 2)}
+        for idx, r in df.tail(CANDIDATE_LOOKBACK_DAYS).iterrows()
+    ]
+    return entry
+
+
+def build_recommend_list(watchlist_results: dict) -> tuple:
+    """
+    推薦股邏輯：候選股（全市場粗篩後的50檔）+ 自選股本身，兩邊合併，
+    依分數絕對值排序，取前 RECOMMEND_TOTAL 檔。
+    回傳 (推薦股id清單, 候選股分析結果dict)，候選股結果要併入 latest.json 才能讓網頁查得到。
+    """
+    candidate_ids = scan_market_candidates()
+    candidate_results = {}
+
+    for stock_id in candidate_ids:
+        if stock_id in watchlist_results:
+            continue  # 已經在自選股裡分析過了，不用重複抓
+        try:
+            candidate_results[stock_id] = analyze_candidate(stock_id)
+        except Exception as e:
+            print(f"候選股 {stock_id} 分析失敗，略過：{e}")
+
+    pool = {**watchlist_results, **candidate_results}
+    ranked = sorted(pool.items(), key=lambda kv: abs(kv[1].get("score", 0)), reverse=True)
+    recommend_ids = [stock_id for stock_id, _ in ranked[:RECOMMEND_TOTAL]]
+
+    return recommend_ids, candidate_results
+
+
+# ============================================================
 # 主流程
 # ============================================================
 
@@ -392,6 +512,16 @@ def main():
     # --- 存回累積歷史 ---
     save_history(history)
 
+    # --- 推薦股：全市場掃描 + 自選股，取分數絕對值最大的前30檔 ---
+    try:
+        watchlist_only = {k: v for k, v in all_results.items() if k in CORE_WATCHLIST}
+        recommend_ids, candidate_results = build_recommend_list(watchlist_only)
+        all_results.update(candidate_results)
+        all_results["_recommend"] = recommend_ids
+        print(f"推薦股掃描完成，共 {len(recommend_ids)} 檔（候選股新增分析 {len(candidate_results)} 檔）")
+    except Exception as e:
+        print(f"推薦股掃描失敗，略過本次推薦更新：{e}")
+
     # --- 組推播訊息 ---
     def format_entry_line(e):
         lv = e.get("levels", {})
@@ -418,6 +548,10 @@ def main():
     push_message(message)
 
     # --- 存檔給網頁看板用（當下快照，含判定/評分/價位/回測/K線資料） ---
+    all_results["_meta"] = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "mode": "daily",
+    }
     with open(os.path.join(DATA_DIR, "latest.json"), "w", encoding="utf-8") as f:
         json.dump(all_results, f, ensure_ascii=False)
 
@@ -529,6 +663,10 @@ def intraday_main():
         except Exception as e:
             print(f"{stock_id} 盤中分析失敗，略過：{e}")
 
+    all_results["_meta"] = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "mode": "intraday",
+    }
     with open(latest_path, "w", encoding="utf-8") as f:
         json.dump(all_results, f, ensure_ascii=False)
 
