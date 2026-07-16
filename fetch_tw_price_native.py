@@ -395,3 +395,85 @@ def fetch_index_price_range(start_date: str, end_date: str = None) -> pd.DataFra
     df = pd.DataFrame(sorted_rows)
     df["date"] = pd.to_datetime(df["date"])
     return df.set_index("date").sort_index()[["open", "high", "low", "close", "volume"]]
+
+
+# ============================================================
+# 全市場當日資料（一次抓齊，用來做推薦股的初步篩選）
+# ============================================================
+
+def fetch_all_market_daily() -> pd.DataFrame:
+    """
+    抓取上市全部個股「當日」成交資訊，一次呼叫拿到整個上市市場的資料
+    （免費，證交所 STOCK_DAY_ALL 開放資料）。
+    回傳 DataFrame，欄位包含：證券代號、證券名稱、開盤價、最高價、最低價、收盤價、
+    漲跌價差、成交股數 等，用來做「推薦股」的第一階段粗篩，不是拿來算技術指標用的。
+    """
+    url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data"
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    df = pd.read_csv(pd.io.common.StringIO(resp.text), dtype={"證券代號": str})
+    df["證券代號"] = df["證券代號"].str.strip()
+    numeric_cols = ["成交股數", "成交金額", "開盤價", "最高價", "最低價", "收盤價", "漲跌價差", "成交筆數"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", ""), errors="coerce")
+    return df
+
+
+def fetch_otc_market_daily() -> pd.DataFrame:
+    """
+    抓取上櫃全部個股「當日」成交資訊，一次呼叫拿到整個上櫃市場的資料
+    （免費，櫃買中心 OpenAPI，欄位用關鍵字比對抓取，適應對方偶爾調整格式）。
+    回傳格式跟 fetch_all_market_daily() 對齊，方便直接合併使用。
+    """
+    empty = pd.DataFrame(columns=["證券代號", "證券名稱", "開盤價", "最高價", "最低價", "收盤價", "漲跌價差", "成交股數"])
+    now = datetime.now()
+    roc_date = f"{now.year - 1911}/{now.month:02d}/{now.day:02d}"
+    url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+    params = {"l": "zh-tw", "d": roc_date}
+    try:
+        resp = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"抓取上櫃全市場資料失敗，略過本次上櫃部分：{e}")
+        return empty
+
+    rows, fields = None, None
+    for i in range(1, 10):
+        block_fields = data.get(f"fields{i}")
+        block_data = data.get(f"data{i}")
+        if not block_fields or not block_data:
+            continue
+        field_text = "".join(block_fields)
+        if "代號" in field_text and "收盤" in field_text:
+            rows, fields = block_data, block_fields
+            break
+    if rows is None:
+        print("上櫃全市場資料抓不到對應的收盤行情區塊，略過本次上櫃部分")
+        return empty
+
+    try:
+        df = pd.DataFrame(rows, columns=fields)
+    except Exception as e:
+        print(f"上櫃全市場資料欄位對不上（{e}），略過本次上櫃部分")
+        return empty
+
+    def find_col(keyword):
+        return next((c for c in df.columns if keyword in c), None)
+
+    col_map = {
+        "證券代號": find_col("代號"), "證券名稱": find_col("名稱"),
+        "開盤價": find_col("開盤"), "最高價": find_col("最高"), "最低價": find_col("最低"),
+        "收盤價": find_col("收盤"), "漲跌價差": find_col("漲跌"), "成交股數": find_col("成交股數"),
+    }
+    missing = [k for k, v in col_map.items() if v is None]
+    if missing:
+        print(f"上櫃全市場資料缺少欄位：{missing}，略過本次上櫃部分")
+        return empty
+
+    out = pd.DataFrame({new: df[old] for new, old in col_map.items()})
+    out["證券代號"] = out["證券代號"].astype(str).str.strip()
+    for col in ["開盤價", "最高價", "最低價", "收盤價", "漲跌價差", "成交股數"]:
+        out[col] = pd.to_numeric(out[col].astype(str).str.replace(",", ""), errors="coerce")
+    return out
